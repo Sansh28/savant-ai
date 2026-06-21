@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ConversationSidebar } from "@/components/terminal/ConversationSidebar";
 import { InsightsPanel } from "@/components/terminal/InsightsPanel";
+import { OnboardingPanel } from "@/components/terminal/OnboardingPanel";
 import { QueryComposer } from "@/components/terminal/QueryComposer";
 import { SuggestionsPanel } from "@/components/terminal/SuggestionsPanel";
 import { TimelinePanel } from "@/components/terminal/TimelinePanel";
 import { VoicePlaybackPanel } from "@/components/terminal/VoicePlaybackPanel";
+import { WorkspacePanel } from "@/components/terminal/WorkspacePanel";
 import type { Citation, ConversationRecord, DocMeta, QueryTelemetry, WorkflowStage } from "@/components/terminal/types";
 import { savantFetch } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
@@ -46,6 +48,9 @@ const newConversation = (): ConversationRecord => {
   return {
     id: `conv_${now}_${Math.random().toString(16).slice(2, 8)}`,
     title: "New Chat",
+    workspaceName: "New Workspace",
+    folder: "Inbox",
+    pinned: false,
     createdAt: now,
     updatedAt: now,
     docId: null,
@@ -77,6 +82,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
   const [isProcessing, setIsProcessing] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [citations, setCitations] = useState<Citation[]>([]);
+  const [activeCitationIndex, setActiveCitationIndex] = useState<number | null>(null);
   const [telemetry, setTelemetry] = useState<QueryTelemetry | null>(null);
   const [docMeta, setDocMeta] = useState<DocMeta | null>(null);
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([
@@ -121,6 +127,9 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       const mapped: ConversationRecord[] = data.conversations.map((item: Record<string, unknown>) => ({
         id: String(item.conversation_id),
         title: String(item.title || "New Chat"),
+        workspaceName: String(item.workspace_name || item.title || "New Workspace"),
+        folder: String(item.folder || "Inbox"),
+        pinned: Boolean(item.pinned),
         createdAt: new Date((item.created_at as string | number) || Date.now()).getTime(),
         updatedAt: new Date((item.updated_at as string | number) || Date.now()).getTime(),
         docId: (item.doc_id as string | null | undefined) ?? null,
@@ -165,8 +174,14 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
             setConversations([first]);
             setActiveConversationId(first.id);
           } else {
-            setConversations(parsed);
-            setActiveConversationId(parsed[0].id);
+            const normalized = parsed.map((conversation) => ({
+              ...conversation,
+              workspaceName: conversation.workspaceName || conversation.title || "New Workspace",
+              folder: conversation.folder || "Inbox",
+              pinned: Boolean(conversation.pinned),
+            }));
+            setConversations(normalized);
+            setActiveConversationId(normalized[0].id);
           }
         }
       } catch {
@@ -200,6 +215,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     setDocId(activeConversation.docId || null);
     setSessionId(activeConversation.sessionId || null);
     setCitations(activeConversation.citations || []);
+    setActiveCitationIndex(null);
     setTelemetry(activeConversation.telemetry || null);
     setDocMeta(activeConversation.docMeta || null);
     setShareUrl(null);
@@ -290,6 +306,9 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     const snapshot = JSON.stringify({
       id: activeConversationId,
       title: activeConversation.title,
+      workspaceName: activeConversation.workspaceName,
+      folder: activeConversation.folder,
+      pinned: activeConversation.pinned,
       docId: activeConversation.docId,
       fileName: activeConversation.fileName,
       sessionId: activeConversation.sessionId,
@@ -394,6 +413,12 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       if (!res.ok) {
         throw new Error(data.detail || "Failed to poll background job");
       }
+      if (data.status === "queued") {
+        setStage("upload", "active", "Upload received. Waiting for the ingestion worker to begin processing.");
+      }
+      if (data.status === "processing") {
+        setStage("upload", "active", "Extracting text, chunking pages, and preparing retrieval for this paper.");
+      }
       if (data.status === "completed") {
         return data.result ?? null;
       }
@@ -416,6 +441,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     setIsPaused(false);
     setVoiceMode(null);
     setDocMeta(null);
+    setActiveCitationIndex(null);
   };
 
   const renameConversation = async (conversationId: string, title: string) => {
@@ -423,7 +449,17 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     if (!clean) return;
     setConversations((previous) =>
       previous.map((conversation) =>
-        conversation.id === conversationId ? { ...conversation, title: clean.slice(0, 120), updatedAt: Date.now() } : conversation
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              title: clean.slice(0, 120),
+              workspaceName:
+                !conversation.workspaceName || conversation.workspaceName === conversation.title
+                  ? clean.slice(0, 120)
+                  : conversation.workspaceName,
+              updatedAt: Date.now(),
+            }
+          : conversation
       )
     );
     setRenameConversationId(null);
@@ -456,6 +492,48 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     } catch {
       // local state still works
     }
+  };
+
+  const updateConversationMeta = (
+    conversationId: string,
+    updater: (conversation: ConversationRecord) => ConversationRecord
+  ) => {
+    setConversations((previous) =>
+      previous.map((conversation) =>
+        conversation.id === conversationId ? { ...updater(conversation), updatedAt: Date.now() } : conversation
+      )
+    );
+  };
+
+  const togglePinned = (conversationId: string) => {
+    updateConversationMeta(conversationId, (conversation) => ({
+      ...conversation,
+      pinned: !conversation.pinned,
+    }));
+  };
+
+  const updateWorkspaceName = (value: string) => {
+    if (!activeConversationId) return;
+    updateConversationMeta(activeConversationId, (conversation) => ({
+      ...conversation,
+      workspaceName: value || "New Workspace",
+    }));
+  };
+
+  const updateFolder = (value: string) => {
+    if (!activeConversationId) return;
+    updateConversationMeta(activeConversationId, (conversation) => ({
+      ...conversation,
+      folder: value,
+    }));
+  };
+
+  const updatePinnedForActive = (value: boolean) => {
+    if (!activeConversationId) return;
+    updateConversationMeta(activeConversationId, (conversation) => ({
+      ...conversation,
+      pinned: value,
+    }));
   };
 
   const createSession = async (currentDocId?: string, title?: string) => {
@@ -566,6 +644,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
 
     const selectedFile = event.target.files[0];
     setUploadedFileName(selectedFile.name);
+    setActiveCitationIndex(null);
     addLog(`Selected document: ${selectedFile.name}`);
 
     setIsUploading(true);
@@ -633,6 +712,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     }
 
     addLog(`Query initiated: "${promptText}"`);
+    setActiveCitationIndex(null);
     setIsProcessing(true);
     setStage("retrieval", "active", "Searching retrieved paper chunks...");
     setStage("synthesis", "idle", "Waiting for retrieval results.");
@@ -655,6 +735,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       if (res.ok) {
         setCitations(data.citations ?? []);
         setTelemetry(data.telemetry ?? null);
+        setStage("synthesis", "active", "Drafting an answer from the retrieved evidence...");
         setStage(
           "retrieval",
           data.telemetry?.retrieval_mode === "lexical_only" ? "degraded" : "done",
@@ -781,7 +862,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     const term = searchTerm.trim().toLowerCase();
     if (!term) return conversations;
     return conversations.filter((conversation) => {
-      const haystack = `${conversation.title} ${conversation.fileName ?? ""} ${conversation.logs.slice(-2).join(" ")}`.toLowerCase();
+      const haystack = `${conversation.title} ${conversation.workspaceName ?? ""} ${conversation.folder} ${conversation.fileName ?? ""} ${conversation.logs.slice(-2).join(" ")}`.toLowerCase();
       return haystack.includes(term);
     });
   }, [conversations, searchTerm]);
@@ -847,6 +928,84 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     setQuery("");
   };
 
+  const focusCitation = (citation: Citation, index: number) => {
+    setActiveCitationIndex(index);
+    if (citation.page_number) {
+      setPageNumber(String(citation.page_number));
+      addLog(`Focused evidence from page ${citation.page_number}. The page filter is ready for a follow-up question.`);
+    } else {
+      addLog("Focused an evidence card. Use the snippet below to verify the answer path.");
+    }
+  };
+
+  const exportInsights = (format: "markdown" | "notion" | "pdf") => {
+    const exportTitle = activeConversation?.workspaceName || activeConversation?.title || "Savant Session";
+    const evidenceBlock = citations.length
+      ? citations
+          .map((citation, index) => {
+            const header = `Evidence ${index + 1} | page ${citation.page_number ?? "?"} | chunk ${citation.chunk_index ?? "?"}`;
+            const reason = citation.selection_reason ? `Reason: ${citation.selection_reason}` : "";
+            const snippet = citation.snippet || "No snippet available.";
+            return `${header}\n${reason}\n${snippet}`.trim();
+          })
+          .join("\n\n")
+      : "No citations captured yet.";
+    const summaryBody = [
+      `# ${exportTitle}`,
+      "",
+      `Folder: ${activeConversation?.folder ?? "Inbox"}`,
+      `Document: ${uploadedFileName ?? "No document uploaded"}`,
+      "",
+      "## Answer Path",
+      telemetry?.retrieval_mode === "lexical_only" || telemetry?.llm_fallback
+        ? "This session used at least one fallback mode. Review the evidence carefully."
+        : "This session used the primary retrieval and synthesis path.",
+      "",
+      "## Recent Timeline",
+      ...logs.slice(-10).map((line) => `- ${line.replace(/^>\s*/, "")}`),
+      "",
+      "## Evidence",
+      evidenceBlock,
+    ].join("\n");
+
+    if (format === "markdown" || format === "notion") {
+      const blob = new Blob([summaryBody], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${exportTitle.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.${format === "markdown" ? "md" : "txt"}`;
+      link.click();
+      URL.revokeObjectURL(url);
+      addLog(`Exported a ${format === "markdown" ? "Markdown" : "Notion-style"} session summary.`);
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+    if (!printWindow) {
+      addLog("Popup blocked while preparing PDF export.");
+      return;
+    }
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${exportTitle}</title>
+          <style>
+            body { font-family: Georgia, serif; padding: 32px; color: #2b2119; }
+            h1, h2 { color: #6b3a2a; }
+            pre { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #faf7f2; padding: 16px; border: 1px solid #d7c8af; border-radius: 12px; }
+          </style>
+        </head>
+        <body>
+          <pre>${summaryBody.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    addLog("Opened a print-friendly export for PDF saving.");
+  };
+
   return (
     <div className="h-full min-h-[520px] grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">
       <ConversationSidebar
@@ -870,9 +1029,12 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
         }}
         onSearchTermChange={setSearchTerm}
         onSelectConversation={setActiveConversationId}
+        onTogglePinned={togglePinned}
       />
 
       <div className="flex flex-col h-full space-y-4 min-h-0">
+        {!docId ? <OnboardingPanel exampleQuestions={DEFAULT_SUGGESTIONS} onUseExampleQuestion={setQuery} /> : null}
+
         <TimelinePanel
           docMeta={docMeta}
           logScrollPercent={logScrollPercent}
@@ -884,6 +1046,18 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
           onLogScroll={handleLogScroll}
           onLogSliderChange={handleLogSlider}
         />
+
+        {activeConversation ? (
+          <WorkspacePanel
+            folder={activeConversation.folder}
+            pinned={activeConversation.pinned}
+            sessionId={sessionId}
+            workspaceName={activeConversation.workspaceName || activeConversation.title}
+            onFolderChange={updateFolder}
+            onPinnedChange={updatePinnedForActive}
+            onWorkspaceNameChange={updateWorkspaceName}
+          />
+        ) : null}
 
         {(isPlaying || isPaused) && (
           <VoicePlaybackPanel isPaused={isPaused} waveHeights={waveHeights} pauseVoice={pauseVoice} resumeVoice={resumeVoice} stopVoice={stopVoice} />
@@ -913,7 +1087,14 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
           className="hidden"
         />
 
-        <InsightsPanel citations={citations} telemetry={telemetry} />
+        <InsightsPanel
+          activeCitationIndex={activeCitationIndex}
+          citations={citations}
+          hasDocument={Boolean(docId)}
+          telemetry={telemetry}
+          onExport={exportInsights}
+          onFocusCitation={focusCitation}
+        />
 
         <div className="flex flex-col gap-4">
           <SuggestionsPanel

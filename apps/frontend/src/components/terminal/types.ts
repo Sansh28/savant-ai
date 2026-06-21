@@ -29,6 +29,9 @@ export type DocMeta = {
 export type ConversationRecord = {
   id: string;
   title: string;
+  workspaceName: string | null;
+  folder: string;
+  pinned: boolean;
   createdAt: number;
   updatedAt: number;
   docId: string | null;
