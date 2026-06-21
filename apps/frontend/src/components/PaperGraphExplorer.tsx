@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as d3 from "d3";
 import { savantFetch } from "@/lib/api";
 
@@ -26,6 +26,7 @@ type GraphData = {
 };
 
 type QAItem = { question: string; answer: string };
+type GuidedPath = { id: string; label: string; hint: string; nodeId: string | null };
 
 type PaperGraphExplorerProps = {
   embedded?: boolean;
@@ -1069,6 +1070,64 @@ export function PaperGraphExplorer({
     });
   }, []);
 
+  const guidedPaths = useMemo<GuidedPath[]>(() => {
+    if (!graphData) return [];
+    const findNodeId = (matcher: (node: GraphNode) => boolean) => graphData.nodes.find(matcher)?.id ?? null;
+    return [
+      {
+        id: "methods",
+        label: "Methods",
+        hint: "Jump into how the paper approaches the problem.",
+        nodeId: findNodeId((node) => node.category === "method" || /method|approach|procedure/i.test(node.label)),
+      },
+      {
+        id: "results",
+        label: "Results",
+        hint: "Inspect outcomes, benchmarks, and reported gains.",
+        nodeId: findNodeId((node) => node.category === "result" || /result|finding|performance/i.test(node.label)),
+      },
+      {
+        id: "limitations",
+        label: "Limitations",
+        hint: "Look for caveats, tradeoffs, and open questions.",
+        nodeId: findNodeId((node) => /limit|tradeoff|weakness|future/i.test(node.label) || /limit|tradeoff|weakness|future/i.test(node.summary)),
+      },
+    ];
+  }, [graphData]);
+
+  const jumpToGuidedPath = useCallback(
+    (path: GuidedPath) => {
+      if (!path.nodeId || !graphData) return;
+      const nextNode = graphData.nodes.find((node) => node.id === path.nodeId) ?? null;
+      if (nextNode) setSelectedNode(nextNode);
+    },
+    [graphData]
+  );
+
+  const exportWorkspaceSummary = useCallback(() => {
+    if (!workspaceState) return;
+    const content = [
+      "# Savant Graph Workspace",
+      "",
+      `Session: ${workspaceState.sessionId}`,
+      `Bookmarks: ${workspaceState.bookmarks.length}`,
+      `Saved insights: ${workspaceState.savedInsights.length}`,
+      "",
+      "## Saved Insights",
+      ...(workspaceState.savedInsights.length ? workspaceState.savedInsights.map((insight) => `- ${insight}`) : ["- None yet"]),
+      "",
+      "## Node Notes",
+      ...Object.entries(workspaceState.nodeNotes).map(([nodeId, note]) => `- ${nodeId}: ${note}`),
+    ].join("\n");
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "savant-graph-workspace.md";
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [workspaceState]);
+
   useEffect(() => {
     if (backgroundStatus === "loading" && stage === "input") {
       setStage("loading");
@@ -1191,6 +1250,52 @@ export function PaperGraphExplorer({
                   <span style={{ border: "1px solid rgba(99,102,241,0.45)", background: "rgba(99,102,241,0.12)", borderRadius: "999px", padding: "5px 10px", fontSize: "10px", fontFamily: "'DM Mono', monospace", color: "#e0e7ff" }}>
                     {workspaceState.savedInsights.length} saved insights
                   </span>
+                </div>
+                <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>
+                  <div style={{ fontSize: "10px", color: "#c8a55b", fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: "0.12em" }}>
+                    Guided Paths
+                  </div>
+                  <div style={{ display: "grid", gap: "8px" }}>
+                    {guidedPaths.map((path) => (
+                      <button
+                        key={path.id}
+                        type="button"
+                        onClick={() => jumpToGuidedPath(path)}
+                        disabled={!path.nodeId}
+                        style={{
+                          textAlign: "left",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                          background: path.nodeId ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.02)",
+                          borderRadius: "10px",
+                          padding: "10px",
+                          cursor: path.nodeId ? "pointer" : "not-allowed",
+                          opacity: path.nodeId ? 1 : 0.55,
+                        }}
+                      >
+                        <div style={{ fontSize: "11px", color: "#f1f5f9", fontWeight: 700 }}>{path.label}</div>
+                        <div style={{ marginTop: "4px", fontSize: "11px", lineHeight: 1.5, color: "#c6d0df" }}>{path.hint}</div>
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={exportWorkspaceSummary}
+                    style={{
+                      marginTop: "4px",
+                      border: "1px solid rgba(122,91,27,0.7)",
+                      background: "rgba(255,244,214,0.08)",
+                      color: "#f6df9c",
+                      borderRadius: "999px",
+                      padding: "7px 12px",
+                      fontSize: "10px",
+                      fontFamily: "'DM Mono', monospace",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Export Saved Insights
+                  </button>
                 </div>
                 {workspaceState.savedInsights.length > 0 && (
                   <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>

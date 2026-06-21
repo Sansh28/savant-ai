@@ -1,8 +1,14 @@
 import type { Citation, QueryTelemetry } from "@/components/terminal/types";
 
+type ExportFormat = "markdown" | "notion" | "pdf";
+
 type InsightsPanelProps = {
+  activeCitationIndex: number | null;
   citations: Citation[];
+  hasDocument: boolean;
   telemetry: QueryTelemetry | null;
+  onExport: (format: ExportFormat) => void;
+  onFocusCitation: (citation: Citation, index: number) => void;
 };
 
 function fallbackSummary(telemetry: QueryTelemetry | null): string | null {
@@ -19,11 +25,28 @@ function fallbackSummary(telemetry: QueryTelemetry | null): string | null {
   return "The answer came from the normal retrieval and synthesis pipeline.";
 }
 
-export function InsightsPanel({ citations, telemetry }: InsightsPanelProps) {
+export function InsightsPanel({
+  activeCitationIndex,
+  citations,
+  hasDocument,
+  telemetry,
+  onExport,
+  onFocusCitation,
+}: InsightsPanelProps) {
   const summary = fallbackSummary(telemetry);
 
   return (
     <>
+      {!hasDocument && (
+        <div className="bg-[#fffaf2]/80 backdrop-blur-sm border border-[#cfb999] rounded-2xl p-3 space-y-2">
+          <div className="text-xs uppercase tracking-widest text-[#8a6344] font-mono">Before You Ask</div>
+          <div className="text-sm text-[#4b392d] leading-relaxed">
+            Upload a paper first so Savant can retrieve document-specific evidence, attach page-level citations, and
+            build a graph that stays tied to the actual source.
+          </div>
+        </div>
+      )}
+
       {summary && (
         <div className="bg-[#fffaf2]/80 backdrop-blur-sm border border-[#cfb999] rounded-2xl p-3 space-y-3">
           <div className="flex items-center justify-between gap-3">
@@ -41,54 +64,116 @@ export function InsightsPanel({ citations, telemetry }: InsightsPanelProps) {
               {telemetry?.retrieval_mode === "lexical_only" || telemetry?.llm_fallback ? "Degraded Path" : "Primary Path"}
             </div>
           </div>
+          {telemetry?.retrieval_mode === "lexical_only" || telemetry?.llm_fallback ? (
+            <div className="rounded-xl border border-orange-700/20 bg-orange-50 px-3 py-2 text-xs leading-relaxed text-orange-900">
+              This answer is still grounded in retrieved paper content, but it used a fallback path. Treat it as a
+              verified draft and inspect the evidence cards below before relying on the wording.
+            </div>
+          ) : null}
         </div>
       )}
 
-      {citations.length > 0 && (
+      {citations.length > 0 ? (
         <div className="bg-[#fffaf2]/80 backdrop-blur-sm border border-[#cfb999] rounded-2xl p-3 space-y-3">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-xs uppercase tracking-widest text-[#8a6344] font-mono">Evidence</div>
-              <div className="mt-1 text-xs text-[#6e5a47]">Inspect the exact chunk, page reference, and why it was surfaced for this answer.</div>
+              <div className="mt-1 text-xs text-[#6e5a47]">
+                Open a citation, read the snippet, and jump the workspace to the exact page used for the answer.
+              </div>
             </div>
-            <div className="text-[10px] font-mono text-[#7d6348]">{citations.length} cited chunks</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[10px] font-mono text-[#7d6348]">{citations.length} cited chunks</div>
+              <button
+                type="button"
+                onClick={() => onExport("markdown")}
+                className="rounded-full border border-[#cfb999] bg-[#fffdf8] px-3 py-1 text-[10px] font-mono uppercase tracking-[0.12em] text-[#5f4734]"
+              >
+                Export Markdown
+              </button>
+              <button
+                type="button"
+                onClick={() => onExport("notion")}
+                className="rounded-full border border-[#cfb999] bg-[#fffdf8] px-3 py-1 text-[10px] font-mono uppercase tracking-[0.12em] text-[#5f4734]"
+              >
+                Export Summary
+              </button>
+              <button
+                type="button"
+                onClick={() => onExport("pdf")}
+                className="rounded-full border border-[#cfb999] bg-[#fffdf8] px-3 py-1 text-[10px] font-mono uppercase tracking-[0.12em] text-[#5f4734]"
+              >
+                Print to PDF
+              </button>
+            </div>
           </div>
           <div className="space-y-2">
-            {citations.map((citation, idx) => (
-              <details
-                key={`${citation.page_number}-${citation.chunk_index}-${idx}`}
-                className="rounded-lg border border-[#cfb999] bg-[#fffdf8] px-3 py-2"
-              >
-                <summary className="cursor-pointer list-none flex flex-col gap-2 text-xs font-mono text-[#4d3a2c]">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md bg-[#f4ead9] border border-[#ccb794] px-2 py-1">p.{citation.page_number ?? "?"}</span>
-                    <span className="rounded-md bg-[#f4ead9] border border-[#ccb794] px-2 py-1">chunk {citation.chunk_index ?? "?"}</span>
-                    <span className="rounded-md bg-[#e7f2e8] border border-emerald-700/20 px-2 py-1">score {citation.score ?? 0}</span>
-                    {citation.filename ? <span className="truncate text-[#6d5742]">{citation.filename}</span> : null}
-                  </div>
-                  <div className="text-[11px] leading-relaxed text-[#7d6348]">
-                    {citation.selection_reason || "Used as supporting evidence for the generated answer."}
-                  </div>
-                </summary>
-                <div className="mt-3 space-y-3">
-                  {citation.match_terms?.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {citation.match_terms.map((term) => (
-                        <span key={term} className="rounded-full border border-[#ccb794] bg-[#f4ead9] px-2 py-1 text-[10px] font-mono text-[#6d5742]">
-                          {term}
-                        </span>
-                      ))}
+            {citations.map((citation, idx) => {
+              const isActive = activeCitationIndex === idx;
+              return (
+                <details
+                  key={`${citation.page_number}-${citation.chunk_index}-${idx}`}
+                  open={isActive}
+                  className={`rounded-lg border px-3 py-2 ${
+                    isActive ? "border-[#8a6344] bg-[#fff7eb]" : "border-[#cfb999] bg-[#fffdf8]"
+                  }`}
+                >
+                  <summary className="cursor-pointer list-none flex flex-col gap-2 text-xs font-mono text-[#4d3a2c]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-md bg-[#f4ead9] border border-[#ccb794] px-2 py-1">p.{citation.page_number ?? "?"}</span>
+                      <span className="rounded-md bg-[#f4ead9] border border-[#ccb794] px-2 py-1">chunk {citation.chunk_index ?? "?"}</span>
+                      <span className="rounded-md bg-[#e7f2e8] border border-emerald-700/20 px-2 py-1">score {citation.score ?? 0}</span>
+                      {citation.filename ? <span className="truncate text-[#6d5742]">{citation.filename}</span> : null}
                     </div>
-                  ) : null}
-                  <div className="rounded-lg border border-[#cfb999] bg-[#fff9f0] px-3 py-3 text-sm leading-relaxed text-[#443327]">
-                    {citation.snippet || "No snippet available."}
+                    <div className="text-[11px] leading-relaxed text-[#7d6348]">
+                      {citation.selection_reason || "Used as supporting evidence for the generated answer."}
+                    </div>
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    {citation.match_terms?.length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {citation.match_terms.map((term) => (
+                          <span key={term} className="rounded-full border border-[#ccb794] bg-[#f4ead9] px-2 py-1 text-[10px] font-mono text-[#6d5742]">
+                            {term}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="rounded-lg border border-[#cfb999] bg-[#fff9f0] px-3 py-3 text-sm leading-relaxed text-[#443327]">
+                      {citation.snippet || "No snippet available."}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onFocusCitation(citation, idx)}
+                        className="rounded-full border border-[#8a6344] bg-[#f8efe0] px-3 py-1 text-[10px] font-mono uppercase tracking-[0.12em] text-[#5a3a26]"
+                      >
+                        Jump to Evidence
+                      </button>
+                      {citation.snippet ? (
+                        <button
+                          type="button"
+                          onClick={() => void navigator.clipboard.writeText(citation.snippet ?? "")}
+                          className="rounded-full border border-[#cfb999] bg-[#fffdf8] px-3 py-1 text-[10px] font-mono uppercase tracking-[0.12em] text-[#5f4734]"
+                        >
+                          Copy Snippet
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              </details>
-            ))}
+                </details>
+              );
+            })}
           </div>
         </div>
-      )}
+      ) : hasDocument ? (
+        <div className="bg-[#fffaf2]/80 backdrop-blur-sm border border-[#cfb999] rounded-2xl p-3 space-y-2">
+          <div className="text-xs uppercase tracking-widest text-[#8a6344] font-mono">Evidence</div>
+          <div className="text-sm text-[#4b392d] leading-relaxed">
+            Ask a document question to see supporting snippets, page references, and explanation for why each chunk was used.
+          </div>
+        </div>
+      ) : null}
 
       {telemetry && (
         <div className="bg-[#fffaf2]/80 backdrop-blur-sm border border-[#cfb999] rounded-xl p-3 text-xs text-[#5c4735] font-mono">
@@ -105,3 +190,4 @@ export function InsightsPanel({ citations, telemetry }: InsightsPanelProps) {
     </>
   );
 }
+
