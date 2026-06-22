@@ -71,6 +71,9 @@ async def list_chat_conversations(owner_id: str = Depends(security.get_owner_id)
             "_id": 0,
             "conversation_id": 1,
             "title": 1,
+            "workspace_name": 1,
+            "folder": 1,
+            "pinned": 1,
             "doc_id": 1,
             "file_name": 1,
             "session_id": 1,
@@ -106,6 +109,9 @@ async def upsert_chat_conversation_state(
     update_doc = {
         "owner_id": owner_id,
         "title": request.title.strip()[:120],
+        "workspace_name": (request.workspace_name or request.title).strip()[:120],
+        "folder": (request.folder or "Inbox").strip()[:80],
+        "pinned": bool(request.pinned),
         "doc_id": request.doc_id,
         "file_name": request.file_name,
         "session_id": request.session_id,
@@ -121,6 +127,65 @@ async def upsert_chat_conversation_state(
         upsert=True,
     )
     return {"ok": True}
+
+
+@router.get("/research-memory")
+async def list_research_memory(owner_id: str = Depends(security.get_owner_id), doc_id: str | None = None):
+    services.require_database()
+    query = security.owner_filter(owner_id)
+    if doc_id:
+        query["doc_id"] = doc_id
+    docs = await store.research_memory_collection.find(query, {"_id": 0}).sort("updated_at", -1).to_list(length=200)
+    return {"memories": docs}
+
+
+@router.post("/research-memory")
+async def upsert_research_memory(request: models.ResearchMemoryUpsertRequest, owner_id: str = Depends(security.get_owner_id)):
+    services.require_database()
+    topic = request.topic.strip().lower()
+    note = request.note.strip()
+    if not topic or not note:
+        raise HTTPException(status_code=400, detail="Both topic and note are required")
+    now = services.now_utc()
+    await store.research_memory_collection.update_one(
+        security.owner_filter(owner_id, topic=topic, doc_id=request.doc_id),
+        {
+            "$set": {
+                "owner_id": owner_id,
+                "topic": topic[:120],
+                "note": note[:3000],
+                "doc_id": request.doc_id,
+                "session_id": request.session_id,
+                "tags": [tag.strip()[:40] for tag in request.tags if tag.strip()][:12],
+                "updated_at": now,
+            },
+            "$setOnInsert": {"created_at": now, "mentions": 0},
+        },
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@router.get("/analytics/summary")
+async def analytics_summary(owner_id: str = Depends(security.get_owner_id)):
+    services.require_database()
+    events = await store.analytics_events_collection.find(security.owner_filter(owner_id), {"_id": 0}).to_list(length=2000)
+    low_confidence_queries = sum(1 for event in events if event.get("event_type") == "query_completed" and event.get("payload", {}).get("low_confidence"))
+    most_used_graph_nodes: dict[str, int] = {}
+    for event in events:
+        if event.get("event_type") == "graph_generated":
+            doc_id = str(event.get("payload", {}).get("doc_id", ""))
+            if doc_id:
+                most_used_graph_nodes[doc_id] = most_used_graph_nodes.get(doc_id, 0) + 1
+    return {
+        "total_events": len(events),
+        "low_confidence_queries": low_confidence_queries,
+        "most_used_graph_docs": sorted(
+            [{"doc_id": doc_id, "count": count} for doc_id, count in most_used_graph_nodes.items()],
+            key=lambda item: item["count"],
+            reverse=True,
+        )[:10],
+    }
 
 
 @router.patch("/chat/conversations/{conversation_id}")

@@ -130,6 +130,8 @@ class ApiFlowTests(unittest.IsolatedAsyncioTestCase):
             "graph_sessions_collection": store.graph_sessions_collection,
             "graph_messages_collection": store.graph_messages_collection,
             "chat_conversations_collection": store.chat_conversations_collection,
+            "research_memory_collection": store.research_memory_collection,
+            "analytics_events_collection": store.analytics_events_collection,
         }
         store.client = object()
         store.documents_collection = FakeCollection()
@@ -141,6 +143,8 @@ class ApiFlowTests(unittest.IsolatedAsyncioTestCase):
         store.graph_sessions_collection = FakeCollection()
         store.graph_messages_collection = FakeCollection()
         store.chat_conversations_collection = FakeCollection()
+        store.research_memory_collection = FakeCollection()
+        store.analytics_events_collection = FakeCollection()
         self.transport = httpx.ASGITransport(app=app)
         self.client = httpx.AsyncClient(transport=self.transport, base_url="http://testserver")
         self.owner_a_headers = {"Authorization": f"Bearer {security.create_access_token('owner_a')[0]}"}
@@ -281,6 +285,60 @@ class ApiFlowTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/sessions/session-1", headers=self.owner_b_headers)
 
         self.assertEqual(response.status_code, 404)
+
+    async def test_source_ingest_and_compare_and_memory_flow(self):
+        async def fake_embed(_text):
+            return [0.1, 0.2, 0.3]
+
+        async def fake_call_gemini(prompt, system_instruction=None, require_json=False):
+            if "comparing academic papers" in prompt.lower():
+                return "Paper A emphasizes efficiency while Paper B emphasizes robustness."
+            return "Synthesized answer from context."
+
+        with (
+            patch.object(services, "require_runtime_config", return_value=None),
+            patch.object(services, "fetch_source_pdf_bytes", return_value=b"%PDF-1.4 fake"),
+            patch.object(services, "extract_pages_from_pdf_with_ocr", return_value=([{"page_number": 1, "text": "Paper A uses efficient transformers. Paper B uses robust baselines."}], False)),
+            patch.object(services, "embed_via_rest", side_effect=fake_embed),
+            patch.object(services, "call_gemini", side_effect=fake_call_gemini),
+            patch.object(services, "synthesize_audio", return_value=(None, 0.0)),
+        ):
+            ingest_a = await self.client.post(
+                "/ingest/source",
+                headers=self.owner_a_headers,
+                json={"url": "https://arxiv.org/abs/1706.03762", "title": "Paper A"},
+            )
+            self.assertEqual(ingest_a.status_code, 202)
+            doc_a = ingest_a.json()["doc_id"]
+            await self._wait_for_job(ingest_a.json()["job_id"], self.owner_a_headers)
+
+            ingest_b = await self.client.post(
+                "/ingest/source",
+                headers=self.owner_a_headers,
+                json={"url": "https://arxiv.org/abs/1706.03763", "title": "Paper B"},
+            )
+            self.assertEqual(ingest_b.status_code, 202)
+            doc_b = ingest_b.json()["doc_id"]
+            await self._wait_for_job(ingest_b.json()["job_id"], self.owner_a_headers)
+
+            compare = await self.client.post(
+                "/compare",
+                headers=self.owner_a_headers,
+                json={"prompt": "How do these methods differ?", "doc_ids": [doc_a, doc_b]},
+            )
+            self.assertEqual(compare.status_code, 200)
+            self.assertIn("Paper A", compare.json()["answer"])
+
+            memory = await self.client.post(
+                "/research-memory",
+                headers=self.owner_a_headers,
+                json={"topic": "transformers", "note": "Useful for cross-paper method comparison.", "doc_id": doc_a, "tags": ["comparison"]},
+            )
+            self.assertEqual(memory.status_code, 200)
+
+            memory_list = await self.client.get("/research-memory", headers=self.owner_a_headers)
+            self.assertEqual(memory_list.status_code, 200)
+            self.assertEqual(memory_list.json()["memories"][0]["topic"], "transformers")
 
     async def test_conversation_state_requires_bearer_token(self):
         response = await self.client.post(

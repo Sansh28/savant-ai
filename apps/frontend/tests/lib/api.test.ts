@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { savantFetch, withOwnerHeaders } from "@/lib/api";
+import { savantFetch, savantJson, withOwnerHeaders } from "@/lib/api";
 
 vi.mock("@/lib/owner", () => ({
   getClientAuthSession: vi.fn().mockResolvedValue({
@@ -34,5 +34,18 @@ describe("frontend api helpers", () => {
 
     const headers = new Headers(init.headers);
     expect(headers.get("Authorization")).toBe("Bearer test-token");
+  });
+
+  it("parses json responses and throws on backend errors", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: "bad request" }), { status: 400, headers: { "Content-Type": "application/json" } })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(savantJson<{ ok: boolean }>("/healthz")).resolves.toEqual({ ok: true });
+    await expect(savantJson("/broken")).rejects.toThrow("bad request");
   });
 });

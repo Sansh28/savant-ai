@@ -4,6 +4,9 @@ pydantic
 pydantic-settings
 motor
 PyPDF2
+pillow
+pypdfium2
+pytesseract
 python-dotenv
 python-multipart
 elevenlabs

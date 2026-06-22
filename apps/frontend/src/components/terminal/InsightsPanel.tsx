@@ -1,10 +1,11 @@
-import type { Citation, QueryTelemetry } from "@/components/terminal/types";
+import type { Citation, DocMeta, QueryTelemetry } from "@/components/terminal/types";
 
 type ExportFormat = "markdown" | "notion" | "pdf";
 
 type InsightsPanelProps = {
   activeCitationIndex: number | null;
   citations: Citation[];
+  docMeta: DocMeta | null;
   hasDocument: boolean;
   telemetry: QueryTelemetry | null;
   onExport: (format: ExportFormat) => void;
@@ -28,6 +29,7 @@ function fallbackSummary(telemetry: QueryTelemetry | null): string | null {
 export function InsightsPanel({
   activeCitationIndex,
   citations,
+  docMeta,
   hasDocument,
   telemetry,
   onExport,
@@ -72,6 +74,37 @@ export function InsightsPanel({
           ) : null}
         </div>
       )}
+
+      {docMeta && (docMeta.ocrUsed || docMeta.sourceType || docMeta.qualitySignals?.scan_handling) ? (
+        <div className="bg-[#fffaf2]/80 backdrop-blur-sm border border-[#cfb999] rounded-2xl p-3 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-[#8a6344] font-mono">Document Quality</div>
+              <div className="mt-1 text-sm text-[#4b392d] leading-relaxed">
+                Savant keeps track of how the paper entered the system so users can interpret evidence quality in context.
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 text-[10px] font-mono uppercase tracking-[0.14em]">
+              {docMeta.sourceType ? (
+                <span className="rounded-full border border-[#cfb999] bg-[#fffdf8] px-3 py-1 text-[#5f4734]">{docMeta.sourceType}</span>
+              ) : null}
+              {docMeta.ocrUsed ? (
+                <span className="rounded-full border border-[#d1b283] bg-[#fbf2df] px-3 py-1 text-[#7b5531]">OCR recovery</span>
+              ) : null}
+              {docMeta.qualitySignals?.scan_handling ? (
+                <span className="rounded-full border border-[#cfb999] bg-[#fffdf8] px-3 py-1 text-[#5f4734]">
+                  {docMeta.qualitySignals.scan_handling}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          {docMeta.ocrUsed ? (
+            <div className="rounded-xl border border-[#e1c89d] bg-[#fdf4e5] px-3 py-2 text-xs leading-relaxed text-[#6f553d]">
+              OCR was used for this paper, which is helpful for scanned PDFs but can occasionally introduce noisy text. Citation snippets are especially worth checking before export or reuse.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {citations.length > 0 ? (
         <div className="bg-[#fffaf2]/80 backdrop-blur-sm border border-[#cfb999] rounded-2xl p-3 space-y-3">
@@ -184,10 +217,11 @@ export function InsightsPanel({
             <span>llm {telemetry.llm_ms ?? 0}ms</span>
             <span>tts {telemetry.tts_ms ?? 0}ms</span>
             {telemetry.retrieval_mode ? <span>mode {telemetry.retrieval_mode}</span> : null}
+            {telemetry.quality_signals?.low_confidence ? <span>confidence low</span> : null}
+            {typeof telemetry.quality_signals?.evidence_count === "number" ? <span>evidence {telemetry.quality_signals.evidence_count}</span> : null}
           </div>
         </div>
       )}
     </>
   );
 }
-

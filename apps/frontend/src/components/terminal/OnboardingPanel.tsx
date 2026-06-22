@@ -16,6 +16,10 @@ const HOW_SAVANT_WORKS = [
     title: "Verify and explore",
     body: "Inspect citations, see fallback states clearly, and move into the concept graph once the paper is ready.",
   },
+  {
+    title: "Scale to a workspace",
+    body: "Bring in papers from the web, compare multiple documents, and save durable research memory as you learn.",
+  },
 ];
 
 export function OnboardingPanel({ exampleQuestions, onUseExampleQuestion }: OnboardingPanelProps) {
@@ -29,7 +33,7 @@ export function OnboardingPanel({ exampleQuestions, onUseExampleQuestion }: Onbo
             Savant works best when you treat it like a research workspace rather than a one-shot chatbot. Upload a paper,
             ask a few concrete questions, inspect the evidence, and then move into the graph view for structure.
           </p>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {HOW_SAVANT_WORKS.map((step, index) => (
               <div key={step.title} className="rounded-xl border border-[#d8c7ab] bg-[#fffdf8] p-3">
                 <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-[#9a7a57]">Step {index + 1}</div>
@@ -68,4 +72,3 @@ export function OnboardingPanel({ exampleQuestions, onUseExampleQuestion }: Onbo
     </section>
   );
 }
-

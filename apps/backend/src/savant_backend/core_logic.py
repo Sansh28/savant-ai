@@ -86,15 +86,47 @@ def enforce_dag_edges(nodes: list[dict], edges: list[dict]) -> list[dict]:
 
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return []
+
+    sentences = [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", normalized) if sentence.strip()]
+    if len(sentences) <= 1:
+        chunks: list[str] = []
+        start = 0
+        text_len = len(normalized)
+        while start < text_len:
+            end = min(start + chunk_size, text_len)
+            chunks.append(normalized[start:end])
+            step = max(1, chunk_size - overlap)
+            start += step
+        return chunks
+    if not sentences:
+        return [normalized[:chunk_size]]
+
     chunks: list[str] = []
-    start = 0
-    text_len = len(text)
+    current = ""
+    for sentence in sentences:
+        if len(sentence) >= chunk_size:
+          # Hard-split unusually long OCR blocks or malformed paragraphs.
+            for start in range(0, len(sentence), max(200, chunk_size - overlap)):
+                part = sentence[start:start + chunk_size].strip()
+                if part:
+                    chunks.append(part)
+            current = ""
+            continue
+        if not current:
+            current = sentence
+            continue
+        if len(current) + 1 + len(sentence) <= chunk_size:
+            current = f"{current} {sentence}"
+            continue
+        chunks.append(current)
+        tail = current[-overlap:].strip() if overlap > 0 else ""
+        current = f"{tail} {sentence}".strip() if tail else sentence
 
-    while start < text_len:
-        end = min(start + chunk_size, text_len)
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
-
+    if current:
+        chunks.append(current)
     return chunks
 
 
@@ -124,7 +156,9 @@ def hybrid_rerank(prompt: str, candidates: list[dict], limit: int = 5) -> list[d
         text = str(candidate.get("text", "")).lower()
         lexical_score = sum(text.count(token) for token in tokens)
         vector_score = float(candidate.get("score", 0))
-        final_score = (vector_score * 4.0) + lexical_score
+        lexical_boost = lexical_score / max(1, len(tokens))
+        coverage_bonus = sum(1 for token in tokens if token in text) / max(1, len(tokens))
+        final_score = (vector_score * 4.0) + lexical_boost + coverage_bonus
         ranked.append((final_score, candidate))
 
     ranked.sort(key=lambda pair: pair[0], reverse=True)

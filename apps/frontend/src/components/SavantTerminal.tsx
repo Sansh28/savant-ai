@@ -6,12 +6,21 @@ import { ConversationSidebar } from "@/components/terminal/ConversationSidebar";
 import { InsightsPanel } from "@/components/terminal/InsightsPanel";
 import { OnboardingPanel } from "@/components/terminal/OnboardingPanel";
 import { QueryComposer } from "@/components/terminal/QueryComposer";
+import { ResearchOpsPanel } from "@/components/terminal/ResearchOpsPanel";
 import { SuggestionsPanel } from "@/components/terminal/SuggestionsPanel";
 import { TimelinePanel } from "@/components/terminal/TimelinePanel";
 import { VoicePlaybackPanel } from "@/components/terminal/VoicePlaybackPanel";
 import { WorkspacePanel } from "@/components/terminal/WorkspacePanel";
-import type { Citation, ConversationRecord, DocMeta, QueryTelemetry, WorkflowStage } from "@/components/terminal/types";
-import { savantFetch } from "@/lib/api";
+import type {
+  AnalyticsSummary,
+  Citation,
+  ConversationRecord,
+  DocMeta,
+  QueryTelemetry,
+  ResearchMemory,
+  WorkflowStage,
+} from "@/components/terminal/types";
+import { savantFetch, savantJson } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
 
 type SavantTerminalProps = {
@@ -43,6 +52,33 @@ const DOCUMENT_SUGGESTIONS = [
   "What are the biggest limitations or open questions?",
 ];
 
+type JobResult = {
+  doc_id?: string;
+  page_count?: number;
+  chunk_count?: number;
+  retrieval_mode?: string;
+  embedding_stats?: {
+    lexical_fallback_triggered?: boolean;
+  };
+  ingest_ms?: number;
+  ocr_used?: boolean;
+};
+
+type DocumentMetadataPayload = {
+  page_count?: number;
+  chunk_count?: number;
+  retrieval_mode?: string;
+  status?: string;
+  source_url?: string | null;
+  source_type?: string | null;
+  ocr_used?: boolean;
+  quality_signals?: {
+    scan_handling?: string;
+    chunk_count?: number;
+    embedded_chunks?: number;
+  };
+};
+
 const newConversation = (): ConversationRecord => {
   const now = Date.now();
   return {
@@ -62,6 +98,22 @@ const newConversation = (): ConversationRecord => {
     docMeta: null,
   };
 };
+
+function toDocMeta(payload: DocumentMetadataPayload | null | undefined, ingestMs?: number): DocMeta | null {
+  if (!payload && ingestMs === undefined) return null;
+  return {
+    chunksProcessed: Number(payload?.chunk_count || 0),
+    chunksStored: Number(payload?.chunk_count || 0),
+    pageCount: Number(payload?.page_count || 0),
+    ingestMs: typeof ingestMs === "number" ? ingestMs : undefined,
+    sourceUrl: payload?.source_url ?? null,
+    sourceType: payload?.source_type ?? null,
+    ocrUsed: Boolean(payload?.ocr_used),
+    retrievalMode: payload?.retrieval_mode ?? null,
+    status: payload?.status ?? null,
+    qualitySignals: payload?.quality_signals ?? null,
+  };
+}
 
 export function SavantTerminal({ onUploadComplete, onConversationChange, graphStatusByConversation }: SavantTerminalProps) {
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
@@ -85,6 +137,19 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
   const [activeCitationIndex, setActiveCitationIndex] = useState<number | null>(null);
   const [telemetry, setTelemetry] = useState<QueryTelemetry | null>(null);
   const [docMeta, setDocMeta] = useState<DocMeta | null>(null);
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [sourceTitle, setSourceTitle] = useState("");
+  const [isSourceIngesting, setIsSourceIngesting] = useState(false);
+  const [comparePrompt, setComparePrompt] = useState("");
+  const [selectedCompareDocIds, setSelectedCompareDocIds] = useState<string[]>([]);
+  const [isComparing, setIsComparing] = useState(false);
+  const [researchMemories, setResearchMemories] = useState<ResearchMemory[]>([]);
+  const [isLoadingMemories, setIsLoadingMemories] = useState(false);
+  const [memoryTopic, setMemoryTopic] = useState("");
+  const [memoryNote, setMemoryNote] = useState("");
+  const [memoryTags, setMemoryTags] = useState("");
+  const [isSavingMemory, setIsSavingMemory] = useState(false);
+  const [analyticsSummary, setAnalyticsSummary] = useState<AnalyticsSummary | null>(null);
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([
     { id: "upload", label: "Upload", status: "idle", detail: "Waiting for a PDF." },
     { id: "retrieval", label: "Retrieval", status: "idle", detail: "No active query." },
@@ -219,6 +284,12 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     setTelemetry(activeConversation.telemetry || null);
     setDocMeta(activeConversation.docMeta || null);
     setShareUrl(null);
+    setComparePrompt("");
+    setMemoryTopic("");
+    setMemoryNote("");
+    setMemoryTags("");
+    setSelectedCompareDocIds(activeConversation.docId ? [activeConversation.docId] : []);
+    setSourceTitle(activeConversation.fileName || "");
     setWorkflowStages((previous) => [
       {
         id: "upload",
@@ -326,6 +397,9 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             title: activeConversation.title,
+            workspace_name: activeConversation.workspaceName,
+            folder: activeConversation.folder,
+            pinned: activeConversation.pinned,
             doc_id: activeConversation.docId,
             file_name: activeConversation.fileName,
             session_id: activeConversation.sessionId,
@@ -390,34 +464,107 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     return () => window.clearInterval(interval);
   }, [isPaused, isPlaying]);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const payload = await savantJson<AnalyticsSummary>("/analytics/summary");
+        setAnalyticsSummary(payload);
+      } catch {
+        setAnalyticsSummary(null);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!docId) {
+      setResearchMemories([]);
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingMemories(true);
+    void (async () => {
+      try {
+        const payload = await savantJson<{ memories: ResearchMemory[] }>(`/research-memory?doc_id=${encodeURIComponent(docId)}`);
+        if (!cancelled) {
+          setResearchMemories(Array.isArray(payload.memories) ? payload.memories : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setResearchMemories([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingMemories(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [docId]);
+
+  useEffect(() => {
+    if (!docId) return;
+    setSelectedCompareDocIds((previous) => (previous.length ? previous : [docId]));
+  }, [docId]);
+
   const addLog = (message: string) => setLogs((previous) => [...previous, `> ${message}`]);
+
+  const refreshAnalyticsSummary = async () => {
+    try {
+      const payload = await savantJson<AnalyticsSummary>("/analytics/summary");
+      setAnalyticsSummary(payload);
+    } catch {
+      // keep last good snapshot
+    }
+  };
+
+  const loadDocumentMeta = async (nextDocId: string, ingestMs?: number) => {
+    try {
+      const payload = await savantJson<DocumentMetadataPayload>(`/documents/${nextDocId}`);
+      setDocMeta(toDocMeta(payload, ingestMs));
+      return payload;
+    } catch {
+      const fallbackMeta = toDocMeta(
+        {
+          page_count: undefined,
+          chunk_count: undefined,
+          retrieval_mode: undefined,
+          status: "ready",
+        },
+        ingestMs
+      );
+      setDocMeta(fallbackMeta);
+      return null;
+    }
+  };
 
   const waitForJobCompletion = async (jobId: string) => {
     for (let attempt = 0; attempt < 45; attempt += 1) {
       const res = await savantFetch(`/jobs/${jobId}`);
       const data = (await res.json()) as {
         status?: "queued" | "processing" | "completed" | "failed";
-        result?: {
-          doc_id?: string;
-          page_count?: number;
-          chunk_count?: number;
-          retrieval_mode?: string;
-          embedding_stats?: {
-            lexical_fallback_triggered?: boolean;
-          };
-          ingest_ms?: number;
-        };
+        job_type?: string;
+        result?: JobResult;
         error?: string;
+        retries?: number;
+        max_retries?: number;
         detail?: string;
       };
       if (!res.ok) {
         throw new Error(data.detail || "Failed to poll background job");
       }
       if (data.status === "queued") {
-        setStage("upload", "active", "Upload received. Waiting for the ingestion worker to begin processing.");
+        setStage("upload", "active", "Upload received. Waiting for the background worker to begin processing.");
       }
       if (data.status === "processing") {
-        setStage("upload", "active", "Extracting text, chunking pages, and preparing retrieval for this paper.");
+        setStage(
+          "upload",
+          "active",
+          data.job_type === "source_ingestion"
+            ? "Fetching the source PDF, extracting text, and preparing retrieval for this paper."
+            : "Extracting text, chunking pages, and preparing retrieval for this paper."
+        );
       }
       if (data.status === "completed") {
         return data.result ?? null;
@@ -442,6 +589,11 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     setVoiceMode(null);
     setDocMeta(null);
     setActiveCitationIndex(null);
+    setSourceUrl("");
+    setSourceTitle("");
+    setSelectedCompareDocIds([]);
+    setComparePrompt("");
+    setResearchMemories([]);
   };
 
   const renameConversation = async (conversationId: string, title: string) => {
@@ -548,10 +700,24 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
         setSessionId(data.session_id);
         setShareUrl(`${API_BASE_URL}${data.share_url}`);
         addLog(`Session active: ${data.session_id.slice(0, 8)}...`);
+        return data;
       }
     } catch {
       addLog("Session service unavailable. Continuing without persistence.");
     }
+    return null;
+  };
+
+  const activateDocumentInWorkspace = async (nextDocId: string, filename: string, ingestMs?: number) => {
+    setDocId(nextDocId);
+    setUploadedFileName(filename);
+    setSelectedCompareDocIds([nextDocId]);
+    const metadata = await loadDocumentMeta(nextDocId, ingestMs);
+    const session = await createSession(nextDocId, `Session: ${filename}`);
+    if (activeConversationId) {
+      onUploadComplete?.({ docId: nextDocId, filename, conversationId: activeConversationId });
+    }
+    return { metadata, session };
   };
 
   const stopVoice = () => {
@@ -675,22 +841,26 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
           return;
         }
 
-        setDocMeta({
-          chunksProcessed: Number(jobResult.chunk_count || 0),
-          chunksStored: Number(jobResult.chunk_count || 0),
-          pageCount: Number(jobResult.page_count || 0),
-          ingestMs: Number(jobResult.ingest_ms || 0),
-        });
+        setDocMeta(
+          toDocMeta(
+            {
+              page_count: Number(jobResult.page_count || 0),
+              chunk_count: Number(jobResult.chunk_count || 0),
+              retrieval_mode: jobResult.retrieval_mode,
+              ocr_used: Boolean(jobResult.ocr_used),
+              status: "ready",
+            },
+            Number(jobResult.ingest_ms || 0)
+          )
+        );
         setStage("upload", "done", `Stored ${jobResult.chunk_count} chunks across ${jobResult.page_count ?? 0} pages.`);
         addLog(`Ingestion complete! Extracted and stored ${jobResult.chunk_count} chunks.`);
         if (jobResult.page_count) addLog(`Detected ${jobResult.page_count} text pages.`);
+        if (jobResult.ocr_used) addLog("OCR support was used to recover text from a scanned or low-quality PDF.");
         if (jobResult.retrieval_mode === "lexical_only") addLog("Fallback active: lexical-only retrieval was selected during ingestion.");
         if (jobResult.ingest_ms) addLog(`Ingestion latency: ${jobResult.ingest_ms} ms.`);
-
-        await createSession(data.doc_id, `Session: ${selectedFile.name}`);
-        if (activeConversationId) {
-          onUploadComplete?.({ docId: data.doc_id, filename: selectedFile.name, conversationId: activeConversationId });
-        }
+        await activateDocumentInWorkspace(data.doc_id, selectedFile.name, Number(jobResult.ingest_ms || 0));
+        await refreshAnalyticsSummary();
       } else {
         setStage("upload", "error", data.detail || "Upload failed.");
         addLog(`Upload failed: ${data.detail}`);
@@ -701,6 +871,63 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       addLog("Error connecting to backend for upload.");
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleSourceIngest = async () => {
+    if (!sourceUrl.trim()) return;
+    setIsSourceIngesting(true);
+    setActiveCitationIndex(null);
+    setStage("upload", "active", "Queuing source ingestion and remote PDF fetch...");
+    addLog(`Source ingest queued for ${sourceUrl.trim()}`);
+
+    try {
+      const res = await savantFetch("/ingest/source", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: sourceUrl.trim(),
+          title: sourceTitle.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStage("upload", "error", data.detail || "Source ingest failed.");
+        addLog(`Source ingest failed: ${data.detail || "Unknown error"}`);
+        return;
+      }
+
+      const nextFilename = String(sourceTitle.trim() || "Source paper.pdf");
+      setDocId(data.doc_id);
+      setUploadedFileName(nextFilename);
+      addLog(`Source queued. Tracking ingestion job ${String(data.job_id || "").slice(0, 8)}...`);
+
+      const jobResult = await waitForJobCompletion(String(data.job_id));
+      if (!jobResult?.chunk_count) {
+        setDocId(null);
+        setDocMeta(null);
+        setStage("upload", "error", "The fetched source did not produce usable paper text.");
+        addLog("Source ingest finished without usable paper text.");
+        return;
+      }
+
+      await activateDocumentInWorkspace(
+        data.doc_id,
+        nextFilename.endsWith(".pdf") ? nextFilename : `${nextFilename}.pdf`,
+        Number(jobResult.ingest_ms || 0)
+      );
+      setStage("upload", "done", `Fetched and stored ${jobResult.chunk_count} chunks from the source paper.`);
+      addLog(`Source ingest complete! Stored ${jobResult.chunk_count} chunks from ${data.source_type || "source"} paper.`);
+      if (jobResult.ocr_used) addLog("OCR support was used after fetching the source PDF.");
+      setSourceUrl("");
+      setSourceTitle("");
+      await refreshAnalyticsSummary();
+    } catch (error) {
+      console.error(error);
+      setStage("upload", "error", "Backend source-ingest request failed.");
+      addLog("Error connecting to backend for source ingest.");
+    } finally {
+      setIsSourceIngesting(false);
     }
   };
 
@@ -754,7 +981,11 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
         if (data.context_used.length === 0) addLog("No matching chunks were retrieved for this prompt.");
         if (data.telemetry?.retrieval_mode === "lexical_only") addLog("Fallback active: lexical-only retrieval mode was used.");
         if (data.telemetry?.llm_fallback) addLog("Fallback active: local-answer synthesis was used.");
+        if (data.telemetry?.quality_signals?.low_confidence) {
+          addLog("Quality signal: the retrieved evidence was weak, so this answer should be checked carefully.");
+        }
         addLog(`Synthesis: ${data.answer}`);
+        await refreshAnalyticsSummary();
 
         if (data.audio_base64) {
           addLog("Streaming ElevenLabs audio...");
@@ -800,6 +1031,78 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     event.preventDefault();
     await runQuery(query);
     setQuery("");
+  };
+
+  const runCompare = async () => {
+    if (selectedCompareDocIds.length < 2 || !comparePrompt.trim()) return;
+    setIsComparing(true);
+    setActiveCitationIndex(null);
+    setStage("retrieval", "active", `Collecting evidence across ${selectedCompareDocIds.length} papers...`);
+    setStage("synthesis", "idle", "Waiting for cross-paper evidence.");
+    addLog(`Cross-paper compare initiated across ${selectedCompareDocIds.length} documents.`);
+
+    try {
+      const payload = await savantJson<{
+        answer: string;
+        citations: Citation[];
+        context_used: number[];
+        doc_ids: string[];
+      }>("/compare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          doc_ids: selectedCompareDocIds,
+          prompt: comparePrompt.trim(),
+        }),
+      });
+      setCitations(payload.citations ?? []);
+      setTelemetry(null);
+      setStage("retrieval", "done", `Compared ${payload.doc_ids.length} papers with ${payload.context_used.length} cited chunks.`);
+      setStage("synthesis", "done", "Cross-paper comparison completed.");
+      addLog(`Comparison result: ${payload.answer}`);
+      await refreshAnalyticsSummary();
+    } catch (error) {
+      console.error(error);
+      setStage("retrieval", "error", "Cross-paper evidence retrieval failed.");
+      setStage("synthesis", "error", "Comparison synthesis did not complete.");
+      addLog("Cross-paper compare failed. Check document readiness and try again.");
+    } finally {
+      setIsComparing(false);
+    }
+  };
+
+  const saveResearchMemory = async () => {
+    if (!memoryTopic.trim() || !memoryNote.trim()) return;
+    setIsSavingMemory(true);
+    try {
+      await savantJson<{ ok: boolean }>("/research-memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: memoryTopic.trim(),
+          note: memoryNote.trim(),
+          doc_id: docId,
+          session_id: sessionId,
+          tags: memoryTags
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter(Boolean),
+        }),
+      });
+      addLog(`Research memory saved under topic "${memoryTopic.trim()}".`);
+      setMemoryTopic("");
+      setMemoryNote("");
+      setMemoryTags("");
+      if (docId) {
+        const payload = await savantJson<{ memories: ResearchMemory[] }>(`/research-memory?doc_id=${encodeURIComponent(docId)}`);
+        setResearchMemories(Array.isArray(payload.memories) ? payload.memories : []);
+      }
+    } catch (error) {
+      console.error(error);
+      addLog("Saving research memory failed. The rest of the session is still intact.");
+    } finally {
+      setIsSavingMemory(false);
+    }
   };
 
   const startVoiceInput = () => {
@@ -867,6 +1170,39 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     });
   }, [conversations, searchTerm]);
 
+  const availableDocuments = useMemo(() => {
+    const seen = new Set<string>();
+    const docs = conversations.flatMap((conversation) => {
+      if (!conversation.docId || !conversation.fileName || seen.has(conversation.docId)) return [];
+      seen.add(conversation.docId);
+      return [
+        {
+          docId: conversation.docId,
+          fileName: conversation.fileName,
+          sourceType: conversation.docMeta?.sourceType ?? null,
+        },
+      ];
+    });
+    if (docId && uploadedFileName && !seen.has(docId)) {
+      docs.unshift({
+        docId,
+        fileName: uploadedFileName,
+        sourceType: docMeta?.sourceType ?? null,
+      });
+    }
+    return docs;
+  }, [conversations, docId, docMeta?.sourceType, uploadedFileName]);
+
+  const toggleCompareDoc = (nextDocId: string) => {
+    setSelectedCompareDocIds((previous) => {
+      if (previous.includes(nextDocId)) {
+        if (previous.length === 1) return previous;
+        return previous.filter((doc) => doc !== nextDocId);
+      }
+      return [...previous, nextDocId];
+    });
+  };
+
   const timelineItems = useMemo(() => {
     return logs.map((line, index) => {
       const raw = line.replace(/^>\s*/, "");
@@ -880,12 +1216,14 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
 
   const pipelineStatus = useMemo(() => {
     if (isUploading) return "Uploading";
+    if (isSourceIngesting) return "Fetching Source";
+    if (isComparing) return "Comparing";
     if (isProcessing) return "Reasoning";
     if (workflowStages.some((stage) => stage.status === "degraded")) return "Degraded";
     if (workflowStages.some((stage) => stage.status === "error")) return "Attention Needed";
     if (docId) return "Ready";
     return "No Paper";
-  }, [docId, isProcessing, isUploading, workflowStages]);
+  }, [docId, isComparing, isProcessing, isSourceIngesting, isUploading, workflowStages]);
 
   const handleLogScroll = () => {
     if (!logsContainerRef.current) return;
@@ -918,8 +1256,12 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       suggestions.push("What evidence from the paper supports the main claims?");
     }
 
+    if (docMeta?.ocrUsed) {
+      suggestions.push("Which parts of this paper may be unreliable because OCR was needed?");
+    }
+
     return suggestions;
-  }, [citations.length, docId, docMeta?.pageCount]);
+  }, [citations.length, docId, docMeta?.ocrUsed, docMeta?.pageCount]);
 
   const applySuggestedQuestion = async (suggestion: string) => {
     setQuery(suggestion);
@@ -1035,6 +1377,35 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       <div className="flex flex-col h-full space-y-4 min-h-0">
         {!docId ? <OnboardingPanel exampleQuestions={DEFAULT_SUGGESTIONS} onUseExampleQuestion={setQuery} /> : null}
 
+        <ResearchOpsPanel
+          analyticsSummary={analyticsSummary}
+          availableDocuments={availableDocuments}
+          comparePrompt={comparePrompt}
+          currentDocId={docId}
+          docMeta={docMeta}
+          isComparing={isComparing}
+          isLoadingMemories={isLoadingMemories}
+          isSavingMemory={isSavingMemory}
+          isSourceIngesting={isSourceIngesting}
+          memoryNote={memoryNote}
+          memoryTags={memoryTags}
+          memoryTopic={memoryTopic}
+          researchMemories={researchMemories}
+          selectedCompareDocIds={selectedCompareDocIds}
+          sourceTitle={sourceTitle}
+          sourceUrl={sourceUrl}
+          onComparePromptChange={setComparePrompt}
+          onMemoryNoteChange={setMemoryNote}
+          onMemoryTagsChange={setMemoryTags}
+          onMemoryTopicChange={setMemoryTopic}
+          onRunCompare={() => void runCompare()}
+          onSaveMemory={() => void saveResearchMemory()}
+          onSourceTitleChange={setSourceTitle}
+          onSourceUrlChange={setSourceUrl}
+          onSubmitSourceIngest={() => void handleSourceIngest()}
+          onToggleCompareDoc={toggleCompareDoc}
+        />
+
         <TimelinePanel
           docMeta={docMeta}
           logScrollPercent={logScrollPercent}
@@ -1090,6 +1461,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
         <InsightsPanel
           activeCitationIndex={activeCitationIndex}
           citations={citations}
+          docMeta={docMeta}
           hasDocument={Boolean(docId)}
           telemetry={telemetry}
           onExport={exportInsights}
@@ -1109,6 +1481,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
             canUseSpeech={canUseSpeech}
             docId={docId}
             isListening={isListening}
+            isSourceIngesting={isSourceIngesting}
             isProcessing={isProcessing}
             isUploading={isUploading}
             pageNumber={pageNumber}

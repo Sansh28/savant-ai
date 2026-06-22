@@ -17,6 +17,14 @@ export type QueryTelemetry = {
   total_ms?: number;
   retrieval_mode?: "hybrid" | "lexical_only";
   llm_fallback?: boolean;
+  quality_signals?: {
+    low_confidence?: boolean;
+    retrieval_mode?: string;
+    llm_fallback?: boolean;
+    evidence_count?: number;
+    strongest_score?: number;
+    weakest_score?: number;
+  };
 };
 
 export type DocMeta = {
@@ -24,6 +32,34 @@ export type DocMeta = {
   chunksStored?: number;
   pageCount?: number;
   ingestMs?: number;
+  sourceUrl?: string | null;
+  sourceType?: string | null;
+  ocrUsed?: boolean;
+  retrievalMode?: string | null;
+  status?: string | null;
+  qualitySignals?: {
+    scan_handling?: string;
+    chunk_count?: number;
+    embedded_chunks?: number;
+  } | null;
+};
+
+export type ResearchMemory = {
+  topic: string;
+  note?: string;
+  doc_id?: string | null;
+  session_id?: string | null;
+  tags?: string[];
+  mentions?: number;
+  updated_at?: string;
+  created_at?: string;
+  last_question?: string;
+};
+
+export type AnalyticsSummary = {
+  total_events: number;
+  low_confidence_queries: number;
+  most_used_graph_docs: Array<{ doc_id: string; count: number }>;
 };
 
 export type ConversationRecord = {

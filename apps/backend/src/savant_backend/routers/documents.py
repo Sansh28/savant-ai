@@ -27,6 +27,10 @@ async def _insert_document_metadata(owner_id: str, doc_id: str, filename: str) -
         "embedding_stats": {},
         "graph_status": "idle",
         "graph_cache": None,
+        "source_url": None,
+        "source_type": None,
+        "ocr_used": False,
+        "quality_signals": {},
         "latest_job_id": None,
         "last_error": None,
         "created_at": now,
@@ -55,6 +59,19 @@ async def _create_job(owner_id: str, job_type: str, doc_id: str | None, max_retr
     }
     await store.jobs_collection.insert_one(job_doc)
     return job_doc
+
+
+async def _record_analytics_event(owner_id: str, event_type: str, **payload: Any) -> None:
+    if store.analytics_events_collection is None:
+        return
+    await store.analytics_events_collection.insert_one(
+        {
+            "owner_id": owner_id,
+            "event_type": event_type,
+            "payload": payload,
+            "created_at": services.now_utc(),
+        }
+    )
 
 
 async def _update_job(owner_id: str, job_id: str, **fields: Any) -> None:
@@ -109,6 +126,7 @@ async def _run_ingestion_job(job_id: str, owner_id: str, doc_id: str, filename: 
                 "retrieval_mode": payload["retrieval_mode"],
                 "embedding_stats": payload["embedding_stats"],
                 "chunking": payload["chunking"],
+                "ocr_used": payload.get("ocr_used", False),
                 "ingest_ms": round((time.perf_counter() - ingest_start) * 1000, 1),
             }
             await store.documents_collection.update_one(
@@ -121,6 +139,12 @@ async def _run_ingestion_job(job_id: str, owner_id: str, doc_id: str, filename: 
                         "retrieval_mode": payload["retrieval_mode"],
                         "summary": payload["summary"],
                         "embedding_stats": payload["embedding_stats"],
+                        "ocr_used": payload.get("ocr_used", False),
+                        "quality_signals": {
+                            "scan_handling": "ocr" if payload.get("ocr_used") else "native_text",
+                            "chunk_count": len(insert_result.inserted_ids),
+                            "embedded_chunks": payload["embedding_stats"].get("embedded_chunks", 0),
+                        },
                         "graph_status": "idle",
                         "graph_cache": None,
                         "latest_job_id": job_id,
@@ -130,6 +154,7 @@ async def _run_ingestion_job(job_id: str, owner_id: str, doc_id: str, filename: 
                 },
             )
             await _update_job(owner_id, job_id, status="completed", result=result, error=None)
+            await _record_analytics_event(owner_id, "document_ingested", doc_id=doc_id, filename=filename, chunk_count=result["chunk_count"], ocr_used=result["ocr_used"])
             services.log_event(logging.INFO, "document_ingestion_completed", owner_id=owner_id, **result)
             return
         except HTTPException as exc:
@@ -153,6 +178,42 @@ async def _run_ingestion_job(job_id: str, owner_id: str, doc_id: str, filename: 
             )
             await _update_job(owner_id, job_id, status="failed", error=detail, retries=attempts - 1)
             services.log_event(logging.ERROR, "document_ingestion_crashed", owner_id=owner_id, doc_id=doc_id, detail=detail)
+            return
+
+
+async def _run_source_ingestion_job(job_id: str, owner_id: str, doc_id: str, filename: str, source_url: str, source_type: str) -> None:
+    attempts = 0
+    while True:
+        attempts += 1
+        await _update_job(owner_id, job_id, status="processing", retries=attempts - 1, error=None)
+        await store.documents_collection.update_one(
+            security.owner_filter(owner_id, doc_id=doc_id),
+            {
+                "$set": {
+                    "status": "processing",
+                    "latest_job_id": job_id,
+                    "last_error": None,
+                    "source_url": source_url,
+                    "source_type": source_type,
+                    "updated_at": services.now_utc(),
+                }
+            },
+        )
+        try:
+            pdf_bytes = await services.fetch_source_pdf_bytes(source_url)
+            await _run_ingestion_job(job_id, owner_id, doc_id, filename, pdf_bytes)
+            return
+        except HTTPException as exc:
+            if attempts <= config.INGEST_JOB_MAX_RETRIES and exc.status_code >= 500:
+                await asyncio.sleep(1.5 * attempts)
+                continue
+            detail = str(exc.detail)
+            await store.documents_collection.update_one(
+                security.owner_filter(owner_id, doc_id=doc_id),
+                {"$set": {"status": "failed", "last_error": detail, "latest_job_id": job_id, "updated_at": services.now_utc()}},
+            )
+            await _update_job(owner_id, job_id, status="failed", error=detail, retries=attempts - 1)
+            services.log_event(logging.ERROR, "source_ingestion_failed", owner_id=owner_id, doc_id=doc_id, detail=detail)
             return
 
 
@@ -196,6 +257,7 @@ async def _run_graph_job(job_id: str, owner_id: str, doc_id: str) -> None:
                 },
             )
             await _update_job(owner_id, job_id, status="completed", result=result, error=None)
+            await _record_analytics_event(owner_id, "graph_generated", doc_id=doc_id, node_count=len(graph_data.get("nodes", [])))
             services.log_event(logging.INFO, "graph_generation_completed", owner_id=owner_id, doc_id=doc_id, nodes=len(graph_data.get("nodes", [])))
             return
         except HTTPException as exc:
@@ -252,7 +314,7 @@ async def upload_document(file: UploadFile = File(...), owner_id: str = Depends(
     pdf_bytes = await file.read()
     doc_id = str(uuid.uuid4())
     metadata = await _insert_document_metadata(owner_id, doc_id, filename)
-    job = await _create_job(owner_id, "document_ingestion", doc_id, max_retries=1)
+    job = await _create_job(owner_id, "document_ingestion", doc_id, max_retries=config.INGEST_JOB_MAX_RETRIES)
     await store.documents_collection.update_one(
         security.owner_filter(owner_id, doc_id=doc_id),
         {"$set": {"latest_job_id": job["job_id"], "updated_at": services.now_utc()}},
@@ -265,6 +327,42 @@ async def upload_document(file: UploadFile = File(...), owner_id: str = Depends(
         "doc_id": doc_id,
         "job_id": job["job_id"],
         "status": metadata["status"],
+        "poll_interval_ms": config.JOB_POLL_INTERVAL_MS,
+    }
+
+
+@router.post("/ingest/source", status_code=202)
+async def ingest_document_from_source(request: models.SourceIngestRequest, owner_id: str = Depends(security.get_owner_id)):
+    services.require_database()
+    services.require_runtime_config()
+    source_url = request.url.strip()
+    if not source_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="A valid http(s) URL is required")
+
+    doc_id = str(uuid.uuid4())
+    source_type = request.source_type or services.classify_source_type(source_url)
+    filename = (request.title or source_url.rstrip("/").split("/")[-1] or f"{source_type}-paper").strip()[:120]
+    if not filename.lower().endswith(".pdf"):
+        filename = f"{filename}.pdf"
+
+    metadata = await _insert_document_metadata(owner_id, doc_id, filename)
+    await store.documents_collection.update_one(
+        security.owner_filter(owner_id, doc_id=doc_id),
+        {"$set": {"source_url": source_url, "source_type": source_type, "updated_at": services.now_utc()}},
+    )
+    job = await _create_job(owner_id, "source_ingestion", doc_id, max_retries=config.INGEST_JOB_MAX_RETRIES)
+    await store.documents_collection.update_one(
+        security.owner_filter(owner_id, doc_id=doc_id),
+        {"$set": {"latest_job_id": job["job_id"], "updated_at": services.now_utc()}},
+    )
+    services.log_event(logging.INFO, "source_ingestion_queued", owner_id=owner_id, doc_id=doc_id, source_url=source_url, source_type=source_type)
+    _spawn_job(job["job_id"], _run_source_ingestion_job(job["job_id"], owner_id, doc_id, filename, source_url, source_type))
+    return {
+        "message": f"Queued {source_type} source for ingestion.",
+        "doc_id": doc_id,
+        "job_id": job["job_id"],
+        "status": metadata["status"],
+        "source_type": source_type,
         "poll_interval_ms": config.JOB_POLL_INTERVAL_MS,
     }
 
@@ -323,7 +421,7 @@ async def start_graph_generation(doc_id: str, owner_id: str = Depends(security.g
             "poll_interval_ms": config.JOB_POLL_INTERVAL_MS,
         }
 
-    job = await _create_job(owner_id, "graph_generation", doc_id, max_retries=1)
+    job = await _create_job(owner_id, "graph_generation", doc_id, max_retries=config.GRAPH_JOB_MAX_RETRIES)
     await store.documents_collection.update_one(
         security.owner_filter(owner_id, doc_id=doc_id),
         {"$set": {"graph_status": "queued", "latest_job_id": job["job_id"], "updated_at": services.now_utc()}},
@@ -433,6 +531,7 @@ async def query_savant(request: models.QueryRequest, owner_id: str = Depends(sec
     lexical_results = services.lexical_results_for_prompt(request.prompt, fallback_docs, limit=10) if fallback_docs else []
     merged_results = services.rerank_results(request.prompt, vector_results, lexical_results, limit=5)
     retrieval_ms = (time.perf_counter() - retrieval_start) * 1000
+    quality_signals = services.quality_signals_for_results(merged_results, retrieval_mode, False)
 
     doc_lookup = await _document_lookup(owner_id, {str(result.get("doc_id")) for result in merged_results if result.get("doc_id")})
     for result in merged_results:
@@ -459,6 +558,7 @@ async def query_savant(request: models.QueryRequest, owner_id: str = Depends(sec
         else:
             raise
     llm_ms = (time.perf_counter() - llm_start) * 1000
+    quality_signals = services.quality_signals_for_results(merged_results, retrieval_mode, llm_fallback)
 
     audio_base64, tts_ms = await services.synthesize_audio(answer_text)
     citations = services.build_citations(merged_results, prompt=request.prompt)
@@ -480,8 +580,36 @@ async def query_savant(request: models.QueryRequest, owner_id: str = Depends(sec
                 }
             )
             await store.sessions_collection.update_one(security.owner_filter(owner_id, session_id=request.session_id), {"$set": {"updated_at": now}})
+    if store.research_memory_collection is not None and request.doc_id:
+        key_terms = [token.lower() for token in request.prompt.split() if len(token.strip()) > 4][:6]
+        for term in key_terms:
+            await store.research_memory_collection.update_one(
+                security.owner_filter(owner_id, topic=term, doc_id=request.doc_id),
+                {
+                    "$set": {
+                        "owner_id": owner_id,
+                        "topic": term,
+                        "doc_id": request.doc_id,
+                        "updated_at": services.now_utc(),
+                        "last_question": request.prompt[:400],
+                    },
+                    "$inc": {"mentions": 1},
+                    "$setOnInsert": {"created_at": services.now_utc(), "tags": ["auto-captured"]},
+                },
+                upsert=True,
+            )
 
     total_ms = (time.perf_counter() - start_time) * 1000
+    await _record_analytics_event(
+        owner_id,
+        "query_completed",
+        doc_id=request.doc_id,
+        session_id=request.session_id,
+        retrieval_mode=retrieval_mode,
+        llm_fallback=llm_fallback,
+        low_confidence=quality_signals["low_confidence"],
+        context_chunks=len(merged_results),
+    )
     services.log_event(
         logging.INFO,
         "query_completed",
@@ -511,5 +639,57 @@ async def query_savant(request: models.QueryRequest, owner_id: str = Depends(sec
             "total_ms": round(total_ms, 1),
             "retrieval_mode": retrieval_mode,
             "llm_fallback": llm_fallback,
+            "quality_signals": quality_signals,
         },
+    }
+
+
+@router.post("/compare")
+async def compare_papers(request: models.CompareRequest, owner_id: str = Depends(security.get_owner_id)):
+    services.require_database()
+    if len(request.doc_ids) > config.COMPARE_MAX_DOCS:
+        raise HTTPException(status_code=400, detail=f"Compare supports up to {config.COMPARE_MAX_DOCS} documents at a time")
+
+    unique_doc_ids = list(dict.fromkeys(request.doc_ids))
+    documents: list[dict[str, Any]] = []
+    combined_candidates: list[dict[str, Any]] = []
+    for doc_id in unique_doc_ids:
+        document = await _load_document(owner_id, doc_id)
+        if document.get("status") != "ready":
+            raise HTTPException(status_code=409, detail=f"Document {doc_id} is still processing")
+        documents.append(document)
+        chunks = await _load_document_chunks(owner_id, doc_id)
+        lexical = services.lexical_results_for_prompt(request.prompt, chunks, limit=4)
+        for item in lexical:
+            item["filename"] = document.get("filename")
+            item["score"] = item.get("score", 0.0)
+        combined_candidates.extend(lexical)
+
+    merged_results = services.rerank_results(request.prompt, [], combined_candidates, limit=8)
+    context_by_doc: dict[str, list[str]] = {}
+    for result in merged_results:
+        result_doc_id = str(result.get("doc_id", ""))
+        context_by_doc.setdefault(result_doc_id, []).append(str(result.get("text", "")).strip())
+
+    compare_context_parts: list[str] = []
+    for document in documents:
+        doc_id = str(document["doc_id"])
+        compare_context_parts.append(
+            f"Document: {document.get('filename', doc_id)}\n"
+            + "\n".join(context_by_doc.get(doc_id, []))[:5000]
+        )
+    compare_prompt = (
+        "You are comparing academic papers. Use only the provided document contexts. "
+        "Explain concrete similarities and differences in a structured, grounded way.\n\n"
+        f"Question: {request.prompt}\n\n"
+        f"{chr(10).join(compare_context_parts)}"
+    )
+    answer = await services.call_gemini(compare_prompt, require_json=False)
+    citations = services.build_citations(merged_results, prompt=request.prompt)
+    await _record_analytics_event(owner_id, "compare_completed", doc_ids=unique_doc_ids, citations=len(citations))
+    return {
+        "answer": answer,
+        "doc_ids": unique_doc_ids,
+        "citations": citations,
+        "context_used": [doc.get("chunk_index") for doc in merged_results],
     }

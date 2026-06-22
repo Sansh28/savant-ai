@@ -50,6 +50,8 @@ export function TimelinePanel({
             {docMeta?.pageCount ? <span className="px-2 py-1 rounded-md bg-[#f4ead9] border border-[#ccb794]">{docMeta.pageCount} pages</span> : null}
             {docMeta?.chunksProcessed ? <span className="px-2 py-1 rounded-md bg-[#f4ead9] border border-[#ccb794]">{docMeta.chunksProcessed} chunks</span> : null}
             {docMeta?.ingestMs ? <span className="px-2 py-1 rounded-md bg-[#f4ead9] border border-[#ccb794]">{docMeta.ingestMs} ms ingest</span> : null}
+            {docMeta?.sourceType ? <span className="px-2 py-1 rounded-md bg-[#f4ead9] border border-[#ccb794]">{docMeta.sourceType}</span> : null}
+            {docMeta?.ocrUsed ? <span className="px-2 py-1 rounded-md bg-[#fbf2df] border border-[#d1b283]">OCR used</span> : null}
           </div>
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
             {workflowStages.map((stage) => (
@@ -84,6 +86,16 @@ export function TimelinePanel({
               </div>
             </div>
           </div>
+          {docMeta?.qualitySignals?.scan_handling || docMeta?.sourceUrl ? (
+            <div className="mt-3 rounded-lg border border-[#cfb999] bg-[#fffcf6] px-3 py-2 text-[11px] text-[#4d3b2d]">
+              <div className="text-[10px] font-mono uppercase tracking-[0.14em] text-[#8a6344]">Document Provenance</div>
+              <div className="mt-1 leading-relaxed">
+                {docMeta?.sourceType ? `Ingested from ${docMeta.sourceType}. ` : ""}
+                {docMeta?.ocrUsed ? "OCR support helped recover text from a scanned or low-quality PDF. " : ""}
+                {docMeta?.qualitySignals?.scan_handling ? `Scan handling mode: ${docMeta.qualitySignals.scan_handling}.` : ""}
+              </div>
+            </div>
+          ) : null}
         </div>
         {timelineItems.map((item) => (
           <div

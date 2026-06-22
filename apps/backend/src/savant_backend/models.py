@@ -18,6 +18,26 @@ class CreateSessionRequest(BaseModel):
     title: str | None = None
 
 
+class CompareRequest(BaseModel):
+    prompt: str
+    doc_ids: list[str] = Field(min_length=2, max_length=6)
+    session_id: str | None = None
+
+
+class SourceIngestRequest(BaseModel):
+    url: str
+    title: str | None = None
+    source_type: str | None = None
+
+
+class ResearchMemoryUpsertRequest(BaseModel):
+    topic: str
+    note: str
+    doc_id: str | None = None
+    session_id: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
 class GraphExtractRequest(BaseModel):
     paper_text: str
 
@@ -59,6 +79,9 @@ class UploadedPaperContextResponse(BaseModel):
 
 class ChatConversationStateRequest(BaseModel):
     title: str
+    workspace_name: str | None = None
+    folder: str | None = None
+    pinned: bool = False
     doc_id: str | None = None
     file_name: str | None = None
     session_id: str | None = None
@@ -91,6 +114,10 @@ class DocumentMetadataResponse(BaseModel):
     embedding_stats: dict[str, Any] = Field(default_factory=dict)
     graph_status: Literal["idle", "queued", "processing", "ready", "failed"] = "idle"
     graph_cache: dict[str, Any] | None = None
+    source_url: str | None = None
+    source_type: str | None = None
+    ocr_used: bool = False
+    quality_signals: dict[str, Any] = Field(default_factory=dict)
     latest_job_id: str | None = None
     last_error: str | None = None
     created_at: datetime
@@ -99,7 +126,7 @@ class DocumentMetadataResponse(BaseModel):
 
 class JobStatusResponse(BaseModel):
     job_id: str
-    job_type: Literal["document_ingestion", "graph_generation"]
+    job_type: Literal["document_ingestion", "graph_generation", "source_ingestion", "audio_generation"]
     doc_id: str | None = None
     owner_id: str
     status: Literal["queued", "processing", "completed", "failed"]

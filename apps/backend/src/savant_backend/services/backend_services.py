@@ -3,13 +3,24 @@ import base64
 import io
 import json
 import logging
+import re
 import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import HTTPException
 from PyPDF2 import PdfReader
+
+try:  # pragma: no cover - optional OCR runtime dependency
+    import pypdfium2 as pdfium
+    import pytesseract
+    from PIL import Image
+except ImportError:  # pragma: no cover - optional OCR runtime dependency
+    pdfium = None
+    pytesseract = None
+    Image = None
 
 from savant_backend import config, store
 from savant_backend.models import VALID_GRAPH_CATEGORIES
@@ -279,12 +290,88 @@ def extract_pages_from_pdf(pdf_bytes: bytes) -> list[dict]:
     return pages
 
 
+def ocr_runtime_available() -> bool:
+    return bool(config.OCR_ENABLED and pdfium and pytesseract and Image)
+
+
+def extract_pages_from_pdf_with_ocr(pdf_bytes: bytes) -> tuple[list[dict], bool]:
+    pages = extract_pages_from_pdf(pdf_bytes)
+    if pages:
+        return pages, False
+    if not ocr_runtime_available():
+        return [], False
+
+    document = pdfium.PdfDocument(pdf_bytes)
+    ocr_pages: list[dict] = []
+    for page_index in range(min(len(document), config.OCR_MAX_PAGES)):
+        page = document[page_index]
+        bitmap = page.render(scale=2).to_pil()
+        page_text = pytesseract.image_to_string(bitmap, lang=config.OCR_LANGUAGES).strip()
+        if page_text:
+            ocr_pages.append({"page_number": page_index + 1, "text": page_text})
+    return ocr_pages, bool(ocr_pages)
+
+
 def summarize_pages(pages: list[dict]) -> str:
     combined = " ".join(str(page.get("text", "")).strip() for page in pages[:3]).strip()
     if not combined:
         return ""
     compact = " ".join(combined.split())
     return compact[:500]
+
+
+def classify_source_type(url: str) -> str:
+    hostname = urlparse(url).netloc.lower()
+    if "arxiv.org" in hostname:
+        return "arxiv"
+    if "semanticscholar.org" in hostname:
+        return "semantic_scholar"
+    if "openreview.net" in hostname:
+        return "openreview"
+    if "dl.acm.org" in hostname:
+        return "acm"
+    if "ieeexplore.ieee.org" in hostname:
+        return "ieee"
+    return "web_pdf"
+
+
+def source_pdf_url(url: str) -> str:
+    parsed = urlparse(url)
+    normalized = parsed._replace(fragment="").geturl()
+    if normalized.lower().endswith(".pdf"):
+        return normalized
+    if "arxiv.org/abs/" in normalized:
+        paper_id = normalized.rsplit("/abs/", 1)[-1]
+        return f"https://arxiv.org/pdf/{paper_id}.pdf"
+    return normalized
+
+
+async def fetch_source_pdf_bytes(url: str) -> bytes:
+    target = source_pdf_url(url)
+    async with httpx.AsyncClient(timeout=config.SOURCE_FETCH_TIMEOUT_SECONDS, follow_redirects=True) as http_client:
+        try:
+            response = await http_client.get(target)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Failed to fetch source document: {exc}") from exc
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "pdf" not in content_type and not target.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Remote source did not resolve to a PDF")
+    return response.content
+
+
+def quality_signals_for_results(results: list[dict], retrieval_mode: str, llm_fallback: bool) -> dict:
+    scores = [float(result.get("score", 0.0) or 0.0) for result in results]
+    top_score = max(scores) if scores else 0.0
+    mean_score = round(sum(scores) / len(scores), 4) if scores else 0.0
+    return {
+        "top_score": round(top_score, 4),
+        "mean_score": mean_score,
+        "result_count": len(results),
+        "low_confidence": top_score < config.QUERY_LOW_CONFIDENCE_SCORE,
+        "retrieval_mode": retrieval_mode,
+        "llm_fallback": llm_fallback,
+    }
 
 
 async def embed_via_rest(text: str) -> list[float]:
@@ -357,9 +444,14 @@ async def embed_via_rest(text: str) -> list[float]:
 
 
 async def ingest_document_payload(owner_id: str, doc_id: str, filename: str, pdf_bytes: bytes) -> dict:
-    pages = extract_pages_from_pdf(pdf_bytes)
+    pages, ocr_used = extract_pages_from_pdf_with_ocr(pdf_bytes)
     if not pages:
-        raise HTTPException(status_code=400, detail="No extractable text found in this PDF. If it is scanned, run OCR first.")
+        if config.OCR_ENABLED:
+            raise HTTPException(
+                status_code=400,
+                detail="No extractable text found in this PDF. OCR support is enabled, but no readable text was recovered.",
+            )
+        raise HTTPException(status_code=400, detail="No extractable text found in this PDF. Enable OCR support for scanned papers.")
 
     insert_data = []
     capped = False
@@ -412,6 +504,7 @@ async def ingest_document_payload(owner_id: str, doc_id: str, filename: str, pdf
         "retrieval_mode": retrieval_mode,
         "summary": summarize_pages(pages),
         "paper_text": "\n\n".join(str(page.get("text", "")).strip() for page in pages if str(page.get("text", "")).strip())[:60000],
+        "ocr_used": ocr_used,
         "embedding_stats": {
             "embedded_chunks": embedded_count,
             "lexical_only_chunks": lexical_only_count,

@@ -15,6 +15,8 @@ messages_collection = db.session_messages if db else None
 graph_sessions_collection = db.graph_sessions if db else None
 graph_messages_collection = db.graph_messages if db else None
 chat_conversations_collection = db.chat_conversations if db else None
+research_memory_collection = db.research_memory if db else None
+analytics_events_collection = db.analytics_events if db else None
 
 elevenlabs_client = ElevenLabs(api_key=config.ELEVENLABS_API_KEY) if config.ELEVENLABS_API_KEY else None
 
@@ -36,6 +38,9 @@ async def ensure_indexes() -> None:
         (graph_sessions_collection, [("owner_id", 1), ("doc_id", 1)], False),
         (graph_messages_collection, [("owner_id", 1), ("session_id", 1), ("node_id", 1), ("created_at", 1)], False),
         (chat_conversations_collection, [("owner_id", 1), ("conversation_id", 1)], True),
+        (research_memory_collection, [("owner_id", 1), ("topic", 1), ("updated_at", -1)], False),
+        (research_memory_collection, [("owner_id", 1), ("doc_id", 1), ("updated_at", -1)], False),
+        (analytics_events_collection, [("owner_id", 1), ("event_type", 1), ("created_at", -1)], False),
     ]
 
     for collection, keys, unique in collections:
