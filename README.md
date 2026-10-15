@@ -6,6 +6,8 @@ Built for HackCU and recognized as the **MLH MongoDB Track Winner**, as describe
 
 [Architecture](docs/ARCHITECTURE.md) · [Workflow](docs/WORKFLOW.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
+[Illustrated product walkthrough and Sansh's contributions](https://github.com/Sansh28/Sansh28/blob/main/case-studies/savant-walkthrough.md) — real local UI captures, contribution links, architecture trade-offs, and current demo limitations.
+
 ## Product experience
 
 - Upload PDFs and ingest their content for retrieval.
