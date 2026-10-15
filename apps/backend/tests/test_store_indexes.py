@@ -17,9 +17,12 @@ class StoreIndexTests(unittest.IsolatedAsyncioTestCase):
             "graph_messages_collection", "chat_conversations_collection",
         ]
         collections = {name: SimpleNamespace(create_index=AsyncMock()) for name in names}
-        with patch.object(store, "db", object()), patch.object(config.settings, "PUBLIC_DEMO", False):
-            with patch.multiple(store, **collections):
-                await store.ensure_indexes()
+        with (
+            patch.object(store, "db", object()),
+            patch.object(config.settings, "PUBLIC_DEMO", False),
+            patch.multiple(store, **collections),
+        ):
+            await store.ensure_indexes()
         unique_count = 0
         for collection in collections.values():
             for call in collection.create_index.call_args_list:
