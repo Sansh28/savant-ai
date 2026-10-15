@@ -1,4 +1,29 @@
-# Savant
+# Savant AI
+
+**Explore research papers through citation-grounded conversations and interactive concept graphs.**
+
+Built for HackCU and recognized as the **MLH MongoDB Track Winner**, as described in [Sansh's project background](https://sansh-portfolio.vercel.app/#projects).
+
+[Architecture](docs/ARCHITECTURE.md) · [Workflow](docs/WORKFLOW.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
+
+## Product experience
+
+- Upload PDFs and ingest their content for retrieval.
+- Ask questions with citations to supporting material.
+- Revisit persisted conversations and document graph workspaces.
+- Explore concept relationships and generated use cases.
+- Extract paper context through a Chrome side panel.
+- Experiment with optional voice playback and Solana payment checks.
+
+This is a hackathon-origin application with continued engineering work. Provider-dependent functionality needs configured services. Generated answers require human verification; this README does not establish production readiness or a working public demo.
+
+## Engineering focus
+
+The application separates retrieval, model generation, persistence, and presentation across three applications. Graph workspaces persist by document ID. The backend, frontend, and extension each have dedicated test directories and validation commands below.
+
+**Canonical repository:** [Sansh28/savant-ai](https://github.com/Sansh28/savant-ai). The [original prototype](https://github.com/Sansh28/savant-hackathon-prototype) preserves the earlier hackathon layout.
+
+## Overview
 
 Savant is a HackCU research assistant monorepo with three connected applications:
 
@@ -9,7 +34,7 @@ Savant is a HackCU research assistant monorepo with three connected applications
 ## Monorepo Layout
 
 ```text
-HackCU_12--main/
+savant-ai/
 ├── apps/
 │   ├── backend/
 │   ├── frontend/
@@ -94,7 +119,7 @@ Use the root [.env.example](./.env.example) as a consolidated reference, then co
 ```bash
 cd apps/backend
 python -m venv venv
-venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
 uvicorn savant_backend.main:app --app-dir src --host 127.0.0.1 --port 8000 --reload
 ```
@@ -130,6 +155,12 @@ Then open `chrome://extensions`, enable Developer Mode, choose `Load unpacked`, 
 - frontend test + lint + typecheck + build
 - extension test + typecheck + build
 - deployment assumption checks for the canonical frontend path
+
+These are workflow definitions, not a claim of passing current runs. Inspect GitHub Actions for execution results. On Windows, activate the backend virtual environment with `venv\Scripts\activate`.
+
+## Before hosting for others
+
+Review document privacy, authentication, resource limits, provider availability and costs. Optional voice and payment integrations require their own credentials. Historical roadmap observations can predate later commits; inspect source and tests for current behavior.
 
 ## Contributor Docs
 
