@@ -1027,19 +1027,16 @@ export function PaperGraphExplorer({
     setWorkspaceState(workspace);
   }, [workspace]);
 
-  useEffect(() => {
-    if (!workspaceState || !selectedNode || !graphData?.nodes.some((node) => node.id === selectedNode.id)) return;
-    if (workspaceState.selectedNodeId === selectedNode.id) return;
-    setWorkspaceState((previous) => (previous ? { ...previous, selectedNodeId: selectedNode.id } : previous));
-  }, [graphData, selectedNode, workspaceState]);
+  const selectConcept = useCallback((node: GraphNode | null) => {
+    setSelectedNode(node);
+    setWorkspaceState((previous) => previous ? { ...previous, selectedNodeId: node?.id ?? null } : previous);
+  }, []);
 
   useEffect(() => {
-    if (!workspaceState?.selectedNodeId || !graphData) return;
+    if (!workspaceState || !graphData) return;
     const nextNode = graphData.nodes.find((node) => node.id === workspaceState.selectedNodeId) ?? null;
-    if (nextNode && nextNode.id !== selectedNode?.id) {
-      setSelectedNode(nextNode);
-    }
-  }, [graphData, selectedNode?.id, workspaceState?.selectedNodeId]);
+    setSelectedNode((previous) => previous?.id === nextNode?.id ? previous : nextNode);
+  }, [graphData, workspaceState]);
 
   useEffect(() => {
     if (!workspaceState?.sessionId) return;
@@ -1133,9 +1130,9 @@ export function PaperGraphExplorer({
     (path: GuidedPath) => {
       if (!path.nodeId || !graphData) return;
       const nextNode = graphData.nodes.find((node) => node.id === path.nodeId) ?? null;
-      if (nextNode) setSelectedNode(nextNode);
+      if (nextNode) selectConcept(nextNode);
     },
-    [graphData]
+    [graphData, selectConcept]
   );
 
   const exportWorkspaceSummary = useCallback(() => {
@@ -1342,7 +1339,7 @@ export function PaperGraphExplorer({
                 )}
               </div>
             )}
-            <GraphCanvas graphData={graphData} selectedId={selectedNode?.id || null} onSelectNode={setSelectedNode} />
+            <GraphCanvas graphData={graphData} selectedId={selectedNode?.id || null} onSelectNode={selectConcept} />
             <Legend />
             {selectedNode && (
               <ConceptCard
@@ -1355,7 +1352,7 @@ export function PaperGraphExplorer({
                 onNoteChange={(value) => updateNodeNote(selectedNode.id, value)}
                 onToggleBookmark={() => toggleBookmark(selectedNode.id)}
                 onSaveInsight={saveInsight}
-                onClose={() => setSelectedNode(null)}
+                onClose={() => selectConcept(null)}
               />
             )}
           </div>
