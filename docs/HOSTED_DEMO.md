@@ -23,7 +23,9 @@ The ingestion and graph jobs run in-process. Use a persistent web service, not a
 - Set `VECTOR_SEARCH_ENABLED=true`, `EMBED_ALLOW_LEXICAL_FALLBACK=false`, `ALLOW_GENERATE_LOCAL_FALLBACK=false`, `REQUIRE_SOLANA_PAYMENT=false` for an honest Atlas verification run.
 - Leave optional voice/payment credentials unset unless those features are explicitly being enabled.
 
-Before public exposure, add enforceable global cost/request and upload-size limits. Session-only throttling is not sufficient: anonymous sessions can be reissued, and the standalone graph extraction routes currently lack an authentication dependency. Apply expiry/cleanup to uploaded documents and disclose that uploads are sent to MongoDB and Google. Do not advertise this as production-ready account authentication or durable job execution.
+Set `PUBLIC_DEMO=true` to enforce the shared, MongoDB-persisted daily provider-call budgets (default 60 generation attempts and 300 embedding attempts, including retries). These caps apply across anonymous sessions and persist across service restarts; quota failures stop provider calls. Public mode also rejects the development signing secret and wildcard CORS origins at startup. PDF uploads are limited to 10 MB, graph inputs are bounded, and standalone graph extraction requires a signed session. The daily budget is shared, so one visitor can exhaust it for others; this is not a per-person entitlement or a provider-level dollar cap.
+
+Before promoting the demo, apply expiry/cleanup to uploaded documents and disclose that uploads are sent to MongoDB and Google. Do not advertise this as production-ready account authentication or durable job execution. Free Render services sleep after inactivity and can take about a minute to wake; disclose this beside the demo link.
 
 ## Atlas vector index
 
