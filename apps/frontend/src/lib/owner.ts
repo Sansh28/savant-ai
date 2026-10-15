@@ -9,6 +9,8 @@ type AuthSession = {
   expiresAt: number;
 };
 
+let pendingSession: Promise<AuthSession> | null = null;
+
 function getClientHint(): string {
   if (typeof window === "undefined") {
     return "server-render";
@@ -69,11 +71,18 @@ async function createSession(): Promise<AuthSession> {
   return session;
 }
 
-export async function getClientAuthSession(): Promise<AuthSession> {
+export async function getClientAuthSession(forceRefresh = false): Promise<AuthSession> {
+  if (typeof window === "undefined") {
+    throw new Error("Savant client sessions are only available in the browser");
+  }
+  if (pendingSession) return pendingSession;
   const existing = readStoredSession();
   const now = Math.floor(Date.now() / 1000);
-  if (existing && existing.expiresAt - 30 > now) {
+  if (!forceRefresh && existing && existing.expiresAt - 30 > now) {
     return existing;
   }
-  return createSession();
+  // Hydration, persistence, and upload can begin together. Issue one owner
+  // session so a document and its subsequent polling requests keep the same owner.
+  pendingSession = createSession().finally(() => { pendingSession = null; });
+  return pendingSession;
 }

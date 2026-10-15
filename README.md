@@ -116,6 +116,10 @@ Use the root [.env.example](./.env.example) as a consolidated reference, then co
 
 ## Local Development
 
+For the verified connected PDF → answer → citation → graph flow, follow
+**[the local demo guide](docs/LOCAL_DEMO.md)**. It includes a dedicated MongoDB,
+same-origin web/API proxy, real Gemini generation, and explicit local retrieval mode.
+
 ### Backend
 
 ```bash

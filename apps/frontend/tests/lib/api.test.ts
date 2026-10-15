@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { savantFetch, withOwnerHeaders } from "@/lib/api";
+import { getClientAuthSession } from "@/lib/owner";
 
 vi.mock("@/lib/owner", () => ({
   getClientAuthSession: vi.fn().mockResolvedValue({
@@ -34,5 +35,15 @@ describe("frontend api helpers", () => {
 
     const headers = new Headers(init.headers);
     expect(headers.get("Authorization")).toBe("Bearer test-token");
+  });
+
+  it("refreshes an invalidated token once and does not loop on another 401", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await savantFetch("/query", { method: "POST", body: "{}" });
+    expect(response.status).toBe(401);
+    expect(getClientAuthSession).toHaveBeenCalledWith(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1].body).toBe("{}");
   });
 });

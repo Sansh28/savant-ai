@@ -44,7 +44,7 @@ type JobPayload = {
   error?: string | null;
 };
 
-async function pollGraphJob(jobId: string, attempts = 40): Promise<{ graphData: GraphPayload; paperText: string }> {
+async function pollGraphJob(jobId: string, attempts = 300): Promise<{ graphData: GraphPayload; paperText: string }> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const response = await savantFetch(`/jobs/${jobId}`);
     const payload = (await response.json()) as JobPayload & { detail?: string };
@@ -70,6 +70,7 @@ export default function Home() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [graphByConversation, setGraphByConversation] = useState<GraphStateByConversation>({});
   const inFlightGraphKeyRef = useRef<string | null>(null);
+  const requestedGraphByConversationRef = useRef(new Map<string, string>());
 
   const ensureGraphWorkspace = useCallback(async (docId: string) => {
     const existingRes = await savantFetch(`/graph/workspaces/by-document/${docId}`);
@@ -201,6 +202,7 @@ export default function Home() {
     ({ conversationId, docId }: { conversationId: string; docId: string | null }) => {
       setActiveConversationId(conversationId);
       if (!docId) {
+        requestedGraphByConversationRef.current.delete(conversationId);
         setGraphByConversation((prev) => {
           const existing = prev[conversationId];
           if (
@@ -226,25 +228,11 @@ export default function Home() {
         return;
       }
 
-      let shouldBuild = false;
-      setGraphByConversation((prev) => {
-        const existing = prev[conversationId];
-        if (existing?.docId === docId) return prev;
-        shouldBuild = true;
-        return {
-          ...prev,
-          [conversationId]: {
-            docId,
-            status: "idle",
-            error: null,
-            prefetched: null,
-            workspace: existing?.workspace ?? null,
-          },
-        };
-      });
-      if (shouldBuild) {
-        void buildGraphInBackground(conversationId, docId);
-      }
+      // React may defer state updaters. Do not use an updater side effect to
+      // decide whether restored graphs and their saved workspace are loaded.
+      if (requestedGraphByConversationRef.current.get(conversationId) === docId) return;
+      requestedGraphByConversationRef.current.set(conversationId, docId);
+      void buildGraphInBackground(conversationId, docId);
     },
     [buildGraphInBackground]
   );
@@ -328,6 +316,20 @@ export default function Home() {
           </div>
 
           <div className={mode === "graph" ? "block" : "hidden"} aria-hidden={mode !== "graph"}>
+            {activeGraphState?.status === "error" && activeConversationId && activeGraphState.docId ? (
+              <div role="alert" className="mb-3 rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+                <p>Graph generation did not complete: {activeGraphState.error}</p>
+                <button
+                  className="mt-2 rounded-lg border border-red-400 px-3 py-1 font-medium"
+                  onClick={() => {
+                    const docId = activeGraphState.docId;
+                    if (docId) void buildGraphInBackground(activeConversationId, docId);
+                  }}
+                >
+                  Retry graph
+                </button>
+              </div>
+            ) : null}
             <PaperGraphExplorer
               embedded
               autoDocId={activeGraphState?.status === "idle" ? activeGraphState?.docId ?? null : null}

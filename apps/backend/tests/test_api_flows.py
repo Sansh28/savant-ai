@@ -9,10 +9,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 try:
     import httpx
+
     from savant_backend import security, store
     from savant_backend.main import app
     from savant_backend.services import backend_services as services
-except Exception as exc:  # pragma: no cover - environment dependency guard
+except ImportError as exc:  # pragma: no cover - missing optional test runtime
     raise unittest.SkipTest(f"API flow tests require a working FastAPI/httpx runtime: {exc}")
 
 
@@ -281,6 +282,25 @@ class ApiFlowTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/sessions/session-1", headers=self.owner_b_headers)
 
         self.assertEqual(response.status_code, 404)
+
+    async def test_local_retrieval_uses_real_chunks_without_atlas_vector_stage(self):
+        from savant_backend import config
+
+        store.documents_collection.docs.append({"owner_id": "owner_a", "doc_id": "local-doc", "status": "ready", "filename": "paper.pdf"})
+        store.document_chunks_collection.docs.append({"owner_id": "owner_a", "doc_id": "local-doc", "page_number": 2, "chunk_index": 0, "text": "Positional encoding represents token order in the Transformer."})
+        with (
+            patch.object(config, "VECTOR_SEARCH_ENABLED", False),
+            patch.object(services, "require_runtime_config", return_value=None),
+            patch.object(services, "embed_via_rest", side_effect=AssertionError("Local mode must not call embeddings")),
+            patch.object(store.document_chunks_collection, "aggregate", side_effect=AssertionError("Local mode must not call Atlas")),
+            patch.object(services, "call_gemini", return_value="Positional encoding supplies token order (page 2)."),
+            patch.object(services, "synthesize_audio", return_value=(None, 0.0)),
+        ):
+            response = await self.client.post("/query", headers=self.owner_a_headers, json={"prompt": "Why positional encoding?", "doc_id": "local-doc"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["telemetry"]["retrieval_mode"], "lexical_only")
+        self.assertFalse(response.json()["telemetry"]["llm_fallback"])
+        self.assertEqual(response.json()["citations"][0]["page_number"], 2)
 
     async def test_conversation_state_requires_bearer_token(self):
         response = await self.client.post(

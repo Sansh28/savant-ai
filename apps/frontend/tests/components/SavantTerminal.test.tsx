@@ -133,6 +133,27 @@ describe("SavantTerminal", () => {
     window.localStorage.clear();
   });
 
+  it("keeps queued documents unavailable until ingestion completes", async () => {
+    let finishJob!: (response: Response) => void;
+    const pendingJob = new Promise<Response>((resolve) => { finishJob = resolve; });
+    const fetchMock = vi.mocked(savantFetch);
+    fetchMock.mockReset();
+    fetchMock.mockRejectedValueOnce(new Error("no backend hydrate"));
+    fetchMock.mockResolvedValueOnce(Response.json({ doc_id: "pending-doc", job_id: "pending-job" }, { status: 202 }));
+    fetchMock.mockReturnValueOnce(pendingJob);
+    fetchMock.mockResolvedValueOnce(Response.json({ session_id: "ready-session" }));
+    const onUploadComplete = vi.fn();
+    render(<SavantTerminal onUploadComplete={onUploadComplete} />);
+    await screen.findByText("trigger-upload");
+    fireEvent.click(screen.getByText("trigger-upload"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/jobs/pending-job"));
+    expect(screen.getByTestId("composer-doc")).toHaveTextContent("none");
+    expect(onUploadComplete).not.toHaveBeenCalled();
+    finishJob(Response.json({ status: "completed", result: { chunk_count: 3, page_count: 2 } }));
+    await waitFor(() => expect(onUploadComplete).toHaveBeenCalledWith(expect.objectContaining({ docId: "pending-doc" })));
+    expect(screen.getByTestId("composer-doc")).toHaveTextContent("pending-doc");
+  });
+
   it("handles upload, query submission, and conversation switching", async () => {
     const fetchMock = vi.mocked(savantFetch);
     fetchMock.mockRejectedValueOnce(new Error("no backend hydrate"));

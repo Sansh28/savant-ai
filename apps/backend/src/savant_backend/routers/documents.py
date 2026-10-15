@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
@@ -10,6 +10,7 @@ from savant_backend import config, models, security, store
 from savant_backend.services import backend_services as services
 
 router = APIRouter()
+logger = logging.getLogger(config.SERVICE_NAME)
 ACTIVE_JOBS: dict[str, asyncio.Task] = {}
 
 
@@ -146,6 +147,7 @@ async def _run_ingestion_job(job_id: str, owner_id: str, doc_id: str, filename: 
             services.log_event(logging.ERROR, "document_ingestion_failed", owner_id=owner_id, doc_id=doc_id, detail=detail)
             return
         except Exception as exc:  # pragma: no cover - defensive background guard
+            logger.exception("Unexpected document ingestion failure")
             detail = str(exc)
             await store.documents_collection.update_one(
                 security.owner_filter(owner_id, doc_id=doc_id),
@@ -212,6 +214,7 @@ async def _run_graph_job(job_id: str, owner_id: str, doc_id: str) -> None:
             services.log_event(logging.ERROR, "graph_generation_failed", owner_id=owner_id, doc_id=doc_id, detail=detail)
             return
         except Exception as exc:  # pragma: no cover - defensive background guard
+            logger.exception("Unexpected graph generation failure")
             detail = str(exc)
             await store.documents_collection.update_one(
                 security.owner_filter(owner_id, doc_id=doc_id),
@@ -242,7 +245,7 @@ async def _document_lookup(owner_id: str, doc_ids: set[str]) -> dict[str, dict[s
 
 
 @router.post("/upload", status_code=202)
-async def upload_document(file: UploadFile = File(...), owner_id: str = Depends(security.get_owner_id)):
+async def upload_document(file: Annotated[UploadFile, File()], owner_id: str = Depends(security.get_owner_id)):
     filename = file.filename or ""
     if not filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
@@ -380,9 +383,10 @@ async def query_savant(request: models.QueryRequest, owner_id: str = Depends(sec
     embed_start = time.perf_counter()
     query_embedding = None
     embed_ms = 0.0
-    retrieval_mode = "hybrid"
+    retrieval_mode = "hybrid" if config.VECTOR_SEARCH_ENABLED else "lexical_only"
     try:
-        query_embedding = await services.embed_via_rest(request.prompt)
+        if config.VECTOR_SEARCH_ENABLED:
+            query_embedding = await services.embed_via_rest(request.prompt)
         embed_ms = (time.perf_counter() - embed_start) * 1000
     except HTTPException as exc:
         if exc.status_code == 429 and config.EMBED_ALLOW_LEXICAL_FALLBACK:
@@ -443,7 +447,8 @@ async def query_savant(request: models.QueryRequest, owner_id: str = Depends(sec
     context_text = services.build_context_text(merged_results)
     full_prompt = (
         "You are Savant. Answer the user's prompt using ONLY the provided text context. "
-        "Be concise, conversational, and include exact references like (page X).\n\n"
+        "Be concise and include exact references like (page X), using the PDF page numbers in the evidence labels. "
+        "Do not infer page numbers from chunk order or invent a page reference. If evidence is insufficient, say so.\n\n"
         f"Context:\n{context_text}\n\nUser Question:\n{request.prompt}"
     )
 

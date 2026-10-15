@@ -66,8 +66,8 @@ export function InsightsPanel({
           </div>
           {telemetry?.retrieval_mode === "lexical_only" || telemetry?.llm_fallback ? (
             <div className="rounded-xl border border-orange-700/20 bg-orange-50 px-3 py-2 text-xs leading-relaxed text-orange-900">
-              This answer is still grounded in retrieved paper content, but it used a fallback path. Treat it as a
-              verified draft and inspect the evidence cards below before relying on the wording.
+              This answer is still grounded in retrieved paper content, but it used a fallback path. Treat it as an
+              unverified draft and inspect the evidence cards below before relying on the wording.
             </div>
           ) : null}
         </div>

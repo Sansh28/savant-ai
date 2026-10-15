@@ -3,24 +3,27 @@ import base64
 import io
 import json
 import logging
+import re
 import time
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import HTTPException
 from PyPDF2 import PdfReader
 
 from savant_backend import config, store
-from savant_backend.models import VALID_GRAPH_CATEGORIES
 from savant_backend.core_logic import (
     chunk_text as _chunk_text,
+)
+from savant_backend.core_logic import (
     enforce_dag_edges,
     extract_retry_delay_seconds,
     fallback_chunks_for_prompt,
     hybrid_rerank,
     local_answer_from_context,
 )
+from savant_backend.models import VALID_GRAPH_CATEGORIES
 
 LAST_EMBED_TS = 0.0
 REQUEST_ID_CTX: ContextVar[str] = ContextVar("request_id", default="-")
@@ -31,7 +34,7 @@ REQUEST_METHOD_CTX: ContextVar[str] = ContextVar("request_method", default="-")
 class JsonLogFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "service": config.SERVICE_NAME,
             "message": record.getMessage(),
@@ -89,7 +92,7 @@ def require_runtime_config() -> None:
 
 
 def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def call_gemini(contents: str, system_instruction: str | None = None, require_json: bool = False) -> str:
@@ -113,7 +116,7 @@ async def call_gemini(contents: str, system_instruction: str | None = None, requ
     async with httpx.AsyncClient(timeout=45) as http_client:
         for attempt in range(config.GENERATE_MAX_RETRIES + 1):
             try:
-                response = await http_client.post(f"{config.GEMINI_GENERATE_URL}?key={config.GEMINI_API_KEY}", json=payload)
+                response = await http_client.post(config.GEMINI_GENERATE_URL, headers={"x-goog-api-key": config.GEMINI_API_KEY}, json=payload)
                 if response.status_code == 429:
                     last_status_code = 429
                     try:
@@ -306,7 +309,8 @@ async def embed_via_rest(text: str) -> list[float]:
                     LAST_EMBED_TS = time.monotonic()
 
                 response = await http_client.post(
-                    f"{config.GEMINI_EMBED_URL}?key={config.GEMINI_API_KEY}",
+                    config.GEMINI_EMBED_URL,
+                    headers={"x-goog-api-key": config.GEMINI_API_KEY},
                     json={"content": {"parts": [{"text": text}]}} ,
                 )
                 if response.status_code == 429:
@@ -381,6 +385,10 @@ async def ingest_document_payload(owner_id: str, doc_id: str, filename: str, pdf
                 "chunk_index": page_chunk_index,
                 "text": chunk,
             }
+            if not config.VECTOR_SEARCH_ENABLED:
+                insert_data.append(base_doc)
+                lexical_only_count += 1
+                continue
             try:
                 embedding = await embed_via_rest(chunk)
                 insert_data.append({**base_doc, "embedding": embedding})
@@ -573,6 +581,7 @@ async def synthesize_audio(answer_text: str) -> tuple[str | None, float]:
         log_event(logging.INFO, "audio_generated", answer_chars=len(answer_text), bytes=len(audio_bytes), duration_ms=round(duration_ms, 1))
         return base64.b64encode(audio_bytes).decode("utf-8"), duration_ms
     except Exception as exc:
+        logger.exception("Unexpected audio provider failure")
         log_event(logging.WARNING, "audio_generation_failed", detail=str(exc))
         return None, 0.0
 
@@ -580,7 +589,10 @@ async def synthesize_audio(answer_text: str) -> tuple[str | None, float]:
 def build_context_text(results: list[dict]) -> str:
     if not results:
         return "No relevant context found."
-    return "\n\n".join(doc.get("text", "") for doc in results)
+    return "\n\n".join(
+        f"[Evidence {index}: PDF page {doc.get('page_number', 'unknown')}, chunk {doc.get('chunk_index', 'unknown')}]\n{doc.get('text', '')}"
+        for index, doc in enumerate(results, start=1)
+    )
 
 
 def explain_result_selection(prompt: str, doc: dict) -> dict:
@@ -611,6 +623,19 @@ def explain_result_selection(prompt: str, doc: dict) -> dict:
     }
 
 
+def citation_snippet(text: str, prompt: str, limit: int = 260) -> str:
+    """Show the relevant part of the retrieved chunk, rather than its heading."""
+    ignored = {"answer", "words", "please", "evidence", "number", "paper", "using", "which", "about"}
+    terms = {term for term in re.findall(r"[a-z]{5,}", prompt.lower()) if term not in ignored}
+    lowered = text.lower()
+    starts = {0}
+    for term in terms:
+        starts.update(max(0, match.start() - 60) for match in re.finditer(re.escape(term), lowered))
+    start = max(sorted(starts), key=lambda offset: sum(term in lowered[offset:offset + limit] for term in terms))
+    excerpt = text[start:start + limit]
+    return ("..." if start else "") + excerpt + ("..." if start + limit < len(text) else "")
+
+
 def build_citations(results: list[dict], prompt: str = "") -> list[dict]:
     return [
         {
@@ -618,7 +643,7 @@ def build_citations(results: list[dict], prompt: str = "") -> list[dict]:
             "page_number": doc.get("page_number"),
             "chunk_index": doc.get("chunk_index"),
             "score": round(float(doc.get("score", 0.0)), 4),
-            "snippet": str(doc.get("text", ""))[:260],
+            "snippet": citation_snippet(str(doc.get("text", "")), prompt),
             **explain_result_selection(prompt, doc),
         }
         for doc in results

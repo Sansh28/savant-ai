@@ -22,7 +22,7 @@ def _b64url_encode(raw: bytes) -> str:
 
 def _b64url_decode(raw: str) -> bytes:
     padding = "=" * (-len(raw) % 4)
-    return base64.urlsafe_b64decode(f"{raw}{padding}".encode("utf-8"))
+    return base64.urlsafe_b64decode(f"{raw}{padding}".encode())
 
 
 def normalize_owner_id(value: str | None) -> str:

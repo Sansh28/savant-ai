@@ -12,10 +12,12 @@ Savant is a three-surface research assistant:
 
 ### 1. PDF upload and ingestion
 
-1. The frontend uploads a PDF to `POST /upload`.
+1. The frontend uploads a PDF to `POST /upload`, which returns a document/job ID.
 2. The backend extracts page text with `PyPDF2`.
-3. Page text is chunked and embedded with Gemini.
+3. Page text is chunked and, when vector search is enabled, embedded with Gemini.
 4. Chunks are stored in MongoDB Atlas with page and chunk metadata.
+5. The frontend polls the job and exposes the document only after ingestion completes.
+   The isolated local setup uses standard MongoDB with explicit lexical retrieval.
 
 ### 2. Document question answering
 
@@ -23,7 +25,8 @@ Savant is a three-surface research assistant:
 2. The backend embeds the question when possible.
 3. MongoDB vector search retrieves candidate chunks.
 4. Lexical fallback reranking supplements retrieval when needed.
-5. Gemini synthesizes an answer from the retrieved context only.
+5. Gemini synthesizes an answer from retrieved context labeled with PDF page/chunk
+   identifiers. Citation snippets select a query-relevant passage from each chunk.
 6. ElevenLabs audio is generated when configured.
 
 ### 3. Graph exploration
@@ -62,8 +65,13 @@ Savant is a three-surface research assistant:
 
 - The backend package under `apps/backend/src/savant_backend/` is the main orchestration layer and should keep moving toward thinner routers and more isolated services
 - The large frontend components still carry too much UI and state logic in single files
-- There is no user authentication or authorization boundary yet
-- Test coverage is still focused on pure logic rather than end-to-end behavior
+- Backend-issued signed client sessions and owner-scoped queries exist; these are
+  not a full user-account identity system. Browser bootstrap requests are shared
+  between concurrent callers, and invalidated tokens refresh once.
+- Ingestion/graph task execution is process-local; persisted job records are not
+  equivalent to a durable worker with restart recovery.
+- Unit/API/component suites are supplemented by a recorded local MongoDB/Gemini
+  browser run; hosted operation and Atlas vector retrieval remain separate gates.
 
 ## Recommended Next Refactor Phases
 
@@ -75,12 +83,14 @@ Savant is a three-surface research assistant:
 
 ### Phase 3
 
-- Introduce authentication and ownership checks for sessions/conversations
+- Evolve client sessions into production account authentication and review sharing
 - Add request logging, rate limiting, and safer sharing semantics
 - Add file-size and abuse protections for uploads
 
 ### Phase 4
 
-- Add integration tests for upload, query, graph extraction, and persistence
-- Add frontend component tests for the main chat and graph flows
-- Add CI checks for backend tests and frontend lint/typecheck
+- Expand live integration coverage beyond the recorded public-paper scenario
+- Add retrieval/citation evaluation over a fixed question set
+- Validate hosted backend operation, durable jobs, and Atlas index configuration
+
+See [local setup](LOCAL_DEMO.md) and [verification record](DEMO_VERIFICATION.md).

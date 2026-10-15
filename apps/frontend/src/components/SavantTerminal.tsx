@@ -104,6 +104,8 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
   const logsContainerRef = useRef<HTMLDivElement | null>(null);
   const [logScrollPercent, setLogScrollPercent] = useState(100);
   const hydratingConversationRef = useRef(false);
+  const hydratedConversationIdRef = useRef<string | null>(null);
+  const [hydrationVersion, setHydrationVersion] = useState(0);
   const lastSyncedSnapshotRef = useRef<string>("");
   const lastConversationPayloadRef = useRef<string>("");
 
@@ -209,7 +211,9 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
   }, [activeConversationId]);
 
   useEffect(() => {
-    if (!activeConversation) return;
+    if (!activeConversation || hydratedConversationIdRef.current === activeConversation.id) return;
+    hydratedConversationIdRef.current = activeConversation.id;
+    hydratingConversationRef.current = true;
     setLogs(activeConversation.logs?.length ? activeConversation.logs : ["> terminal initialized... awaiting document upload."]);
     setUploadedFileName(activeConversation.fileName || null);
     setDocId(activeConversation.docId || null);
@@ -257,6 +261,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     ]);
     requestAnimationFrame(() => {
       hydratingConversationRef.current = false;
+      setHydrationVersion((version) => version + 1);
     });
   }, [activeConversation]);
 
@@ -298,7 +303,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       };
       return next;
     });
-  }, [activeConversationId, citations, docId, docMeta, logs, sessionId, storageReady, telemetry, uploadedFileName]);
+  }, [activeConversationId, citations, docId, docMeta, logs, sessionId, storageReady, telemetry, uploadedFileName, hydrationVersion]);
 
   useEffect(() => {
     if (!storageReady || !activeConversationId || !activeConversation) return;
@@ -393,7 +398,8 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
   const addLog = (message: string) => setLogs((previous) => [...previous, `> ${message}`]);
 
   const waitForJobCompletion = async (jobId: string) => {
-    for (let attempt = 0; attempt < 45; attempt += 1) {
+    // Multi-page papers can take minutes to embed; keep tracking the actual job.
+    for (let attempt = 0; attempt < 300; attempt += 1) {
       const res = await savantFetch(`/jobs/${jobId}`);
       const data = (await res.json()) as {
         status?: "queued" | "processing" | "completed" | "failed";
@@ -662,7 +668,6 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       const data = await res.json();
       if (res.ok) {
         addLog(`Upload queued. Tracking ingestion job ${String(data.job_id || "").slice(0, 8)}...`);
-        setDocId(data.doc_id);
         setStage("upload", "active", "Document uploaded. Background ingestion is processing chunks.");
 
         const jobResult = await waitForJobCompletion(String(data.job_id));
@@ -675,6 +680,9 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
           return;
         }
 
+        // Publishing a queued doc ID starts graph generation before ingestion is
+        // ready. Expose the document only after the job has completed.
+        setDocId(data.doc_id);
         setDocMeta({
           chunksProcessed: Number(jobResult.chunk_count || 0),
           chunksStored: Number(jobResult.chunk_count || 0),
@@ -684,7 +692,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
         setStage("upload", "done", `Stored ${jobResult.chunk_count} chunks across ${jobResult.page_count ?? 0} pages.`);
         addLog(`Ingestion complete! Extracted and stored ${jobResult.chunk_count} chunks.`);
         if (jobResult.page_count) addLog(`Detected ${jobResult.page_count} text pages.`);
-        if (jobResult.retrieval_mode === "lexical_only") addLog("Fallback active: lexical-only retrieval was selected during ingestion.");
+        if (jobResult.retrieval_mode === "lexical_only") addLog("Retrieval mode: lexical-only.");
         if (jobResult.ingest_ms) addLog(`Ingestion latency: ${jobResult.ingest_ms} ms.`);
 
         await createSession(data.doc_id, `Session: ${selectedFile.name}`);
@@ -697,8 +705,9 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       }
     } catch (error) {
       console.error(error);
-      setStage("upload", "error", "Backend upload request failed.");
-      addLog("Error connecting to backend for upload.");
+      const message = error instanceof Error ? error.message : "Backend upload request failed.";
+      setStage("upload", "error", message);
+      addLog(`Upload did not complete: ${message}`);
     } finally {
       setIsUploading(false);
     }
@@ -719,7 +728,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
     setStage("audio", "idle", "No playback started.");
 
     try {
-      addLog("Searching MongoDB Atlas Vector Store...");
+      addLog("Retrieving supporting evidence from the uploaded paper...");
       const res = await savantFetch("/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -740,7 +749,7 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
           "retrieval",
           data.telemetry?.retrieval_mode === "lexical_only" ? "degraded" : "done",
           data.telemetry?.retrieval_mode === "lexical_only"
-            ? "Vector retrieval degraded to lexical-only fallback."
+            ? "Using lexical retrieval; Atlas vector search is not active."
             : `Retrieved ${data.context_used.length} supporting chunks.`
         );
         setStage(

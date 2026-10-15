@@ -6,21 +6,21 @@ from savant_backend import config
 client = AsyncIOMotorClient(config.MONGODB_URI) if config.MONGODB_URI else None
 db = client.savant if client else None
 
-documents_collection = db.documents if db else None
-document_chunks_collection = db.document_chunks if db else None
-jobs_collection = db.jobs if db else None
-payments_collection = db.payments if db else None
-sessions_collection = db.sessions if db else None
-messages_collection = db.session_messages if db else None
-graph_sessions_collection = db.graph_sessions if db else None
-graph_messages_collection = db.graph_messages if db else None
-chat_conversations_collection = db.chat_conversations if db else None
+documents_collection = db.documents if db is not None else None
+document_chunks_collection = db.document_chunks if db is not None else None
+jobs_collection = db.jobs if db is not None else None
+payments_collection = db.payments if db is not None else None
+sessions_collection = db.sessions if db is not None else None
+messages_collection = db.session_messages if db is not None else None
+graph_sessions_collection = db.graph_sessions if db is not None else None
+graph_messages_collection = db.graph_messages if db is not None else None
+chat_conversations_collection = db.chat_conversations if db is not None else None
 
 elevenlabs_client = ElevenLabs(api_key=config.ELEVENLABS_API_KEY) if config.ELEVENLABS_API_KEY else None
 
 
 async def ensure_indexes() -> None:
-    if not db:
+    if db is None:
         return
 
     collections = [

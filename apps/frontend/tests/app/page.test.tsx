@@ -66,6 +66,20 @@ describe("Home page graph orchestration", () => {
     vi.clearAllMocks();
   });
 
+  it("restores a cached graph and saved workspace when selecting an existing conversation", async () => {
+    const fetchMock = vi.mocked(savantFetch);
+    fetchMock.mockReset();
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ status: "completed" }))
+      .mockResolvedValueOnce(Response.json({ graph_cache: { graph_data: { title: "Saved graph", nodes: [], edges: [] }, paper_text: "Saved paper" } }))
+      .mockResolvedValueOnce(Response.json({ workspace: { session_id: "saved-workspace", bookmarks: ["position"], saved_insights: [], node_notes: {} } }));
+    render(<Home />);
+    fireEvent.click(screen.getByText("select-conversation"));
+    await waitFor(() => expect(screen.getByText("workspace:saved-workspace")).toBeInTheDocument());
+    expect(screen.getByText("backgroundStatus:ready")).toBeInTheDocument();
+    expect(screen.getByText("prefetched:Saved graph")).toBeInTheDocument();
+  });
+
   it("builds a graph in the background after upload and exposes it in graph mode", async () => {
     const fetchMock = vi.mocked(savantFetch);
     fetchMock
