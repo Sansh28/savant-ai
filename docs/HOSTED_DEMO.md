@@ -1,14 +1,14 @@
 # Hosted demo deployment gate
 
-This is a deployment checklist, not a claim that the public demo is live.
+The [public demo](https://hackcu12.vercel.app/) was verified on October 15, 2026. See [the verification record](DEMO_VERIFICATION.md) for evidence and boundaries. This checklist also documents how to reproduce the deployment.
 
 ## Frontend: existing Vercel project
 
 - Repository: `Sansh28/savant-ai`, production branch `main`.
 - Root directory: `apps/frontend`; framework: Next.js.
 - Install: `npm ci`; build: `npm run build`.
-- Set `NEXT_PUBLIC_API_BASE_URL=/api/backend`.
-- Set server-only `SAVANT_API_ORIGIN` to the HTTPS backend origin, without a trailing slash.
+- Hosted configuration: `NEXT_PUBLIC_API_BASE_URL=https://savant-api-fo6z.onrender.com` (direct HTTPS API; backend CORS allows the frontend origin).
+- For same-origin proxy deployments instead, use `NEXT_PUBLIC_API_BASE_URL=/api/backend` and server-only `SAVANT_API_ORIGIN` pointing at the HTTPS backend. Do not mix the two paths unintentionally.
 - Redeploy after changing either variable. Never place provider keys in `NEXT_PUBLIC_*` variables.
 
 ## Backend: persistent Python service

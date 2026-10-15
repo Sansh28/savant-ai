@@ -1,4 +1,24 @@
-# Connected local demo verification — October 15, 2026
+# Savant demo verification — October 15, 2026
+
+## Hosted verification
+
+- Web: https://hackcu12.vercel.app/ (Vercel, apps/frontend, Next.js).
+- API: https://savant-api-fo6z.onrender.com (Render Free, Python 3.12, one worker).
+- Atlas Cluster0: vector_index on savant.document_chunks, READY/queryable, 3072-dimensional cosine vectors with owner_id/doc_id/page_number filter fields.
+- Public input: *Attention Is All You Need*, arXiv 1706.03762. Uploaded through the actual public browser UI and independently through the HTTPS API.
+- Both hosted ingestions: 15 pages, 39 chunks. API metadata confirmed 39 embedded chunks, zero lexical-only chunks, no embedding fallback.
+- Browser question: why the Transformer uses positional encoding. Real Gemini answer cited PDF page 6 / section 3.5; five evidence cards, including Atlas score 0.8878. Retrieval mode hybrid. Independent API run also returned five citations and nonzero vector scores, with llm_fallback=false.
+- Browser graph: 16 concepts, 20 connections, selected Positional Encoding, bookmarked it, and received a Gemini follow-up. Reload restored document, answer, citations, cached graph, selected concept, and bookmark.
+- Hosted boundary checks: other-owner document access 404; no-token document/graph access 401; upload exceeding 10 MB rejected 413; expected frontend CORS origin allowed, untrusted origin rejected 400.
+- Backend regression suite: 22 passed, Ruff passed. Frontend: 11 passed, TypeScript and ESLint passed. Dedicated regression tests cover owner-scoped legacy-compatible indexes and saved concept conversations.
+
+Deployment diagnosis: a second leftover URI-template line caused InvalidURI at process import. Once removed, startup reached Atlas but failed on duplicate legacy documents without owner IDs. Named partial unique indexes now enforce owner-scoped uniqueness without deleting or adopting legacy records. Gemini credentials are service secrets, never browser variables or committed files. The owner approved replacing Atlas's all-IP rule with Render's two egress ranges; the existing university entry was preserved.
+
+Public demo protections: explicit CORS, unique signing secret, signed sessions and owner filters, bounded PDF/graph/query inputs, and persistent shared daily Gemini attempt caps (including retries). These are not full account authentication, comprehensive abuse protection, or provider-level spending guarantees. The new graph follow-up change passes session/node IDs and restores role-based history; the final hosted recheck is recorded in the walkthrough.
+
+Limits: free-host cold starts and restarts; in-process jobs are not durable; shared daily quotas can be exhausted; content is stored in Atlas and sent to Google; public non-sensitive uploads only. ElevenLabs and payments are not enabled. Browser speech is optional. The Chrome extension and paid integrations were not exercised in this hosted run. No accuracy, scalability, uptime, or production-readiness benchmark is claimed.
+
+## Earlier local verification
 
 ## Environment and boundaries
 

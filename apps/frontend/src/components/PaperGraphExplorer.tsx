@@ -296,9 +296,10 @@ function GraphCanvas({ graphData, selectedId, onSelectNode }: {
   return <svg ref={svgRef} style={{ width: "100%", height: "100%" }} />;
 }
 
-function ConceptCard({
+export function ConceptCard({
   node,
   paperText,
+  sessionId,
   onClose,
   note,
   isBookmarked,
@@ -308,6 +309,7 @@ function ConceptCard({
 }: {
   node: GraphNode;
   paperText: string;
+  sessionId?: string;
   onClose: () => void;
   note: string;
   isBookmarked: boolean;
@@ -318,17 +320,48 @@ function ConceptCard({
   const [qaList, setQaList] = useState<QAItem[]>([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(Boolean(sessionId));
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const colors = categoryColors[node.category] || categoryColors.concept;
 
+  useEffect(() => {
+    let active = true;
+    if (!sessionId) {
+      setHistoryLoading(false);
+      return;
+    }
+    setHistoryLoading(true);
+    void savantFetch(`/graph/sessions/${sessionId}/nodes/${node.id}/messages`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to restore concept conversation");
+        const data = await response.json() as { messages?: Array<{ role: string; content: string }> };
+        const restored: QAItem[] = [];
+        let question = "";
+        for (const message of data.messages ?? []) {
+          if (message.role === "user") question = message.content;
+          else if (message.role === "assistant" && question) {
+            restored.push({ question, answer: message.content });
+            question = "";
+          }
+        }
+        if (active) setQaList(restored);
+      })
+      .catch(() => { /* The user can still ask a new question if history is unavailable. */ })
+      .finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; };
+  }, [node.id, sessionId]);
+
   const handleAsk = async () => {
-    if (!question.trim() || loading) return;
+    if (!question.trim() || loading || historyLoading) return;
     const q = question.trim();
     setQuestion("");
     setLoading(true);
 
     try {
-      const history = qaList.map((qa) => ({ question: qa.question, answer: qa.answer }));
+      const history = qaList.slice(-8).flatMap((qa) => [
+        { role: "user", content: qa.question },
+        { role: "assistant", content: qa.answer },
+      ]);
       const res = await savantFetch("/graph/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -338,6 +371,7 @@ function ConceptCard({
           paper_context: paperText,
           history,
           node_id: node.id,
+          session_id: sessionId,
         }),
       });
       const data = await res.json();
@@ -668,7 +702,7 @@ function ConceptCard({
           <button
             className="ask-btn"
             onClick={() => void handleAsk()}
-            disabled={loading || !question.trim()}
+            disabled={loading || historyLoading || !question.trim()}
             style={{
               background: `linear-gradient(135deg, ${colors.node}, ${colors.glow})`,
               border: "none",
@@ -1312,8 +1346,10 @@ export function PaperGraphExplorer({
             <Legend />
             {selectedNode && (
               <ConceptCard
+                key={`${workspaceState?.sessionId ?? "draft"}:${selectedNode.id}`}
                 node={selectedNode}
                 paperText={paperText}
+                sessionId={workspaceState?.sessionId}
                 note={workspaceState?.nodeNotes?.[selectedNode.id] ?? ""}
                 isBookmarked={Boolean(workspaceState?.bookmarks.includes(selectedNode.id))}
                 onNoteChange={(value) => updateNodeNote(selectedNode.id, value)}

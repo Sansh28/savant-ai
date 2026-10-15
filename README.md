@@ -4,9 +4,13 @@
 
 Built for HackCU and recognized as the **MLH MongoDB Track Winner**, as described in [Sansh's project background](https://sansh-portfolio.vercel.app/#projects).
 
+**[Try the live demo →](https://hackcu12.vercel.app/)**
+
+Upload a public PDF, ask a question, inspect its page citations, then open Paper Graph Explorer. Free hosting can take about a minute to wake. Upload public, non-sensitive documents only; AI usage is shared and capped daily.
+
 [Architecture](docs/ARCHITECTURE.md) · [Workflow](docs/WORKFLOW.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
-[Illustrated product walkthrough and Sansh's contributions](https://github.com/Sansh28/Sansh28/blob/main/case-studies/savant-walkthrough.md) — real local UI captures, contribution links, architecture trade-offs, and current demo limitations.
+[Illustrated product walkthrough and Sansh's contributions](https://github.com/Sansh28/Sansh28/blob/main/case-studies/savant-walkthrough.md) — authentic hosted UI captures, contribution links, architecture trade-offs, and current demo limitations.
 
 ## Product experience
 
@@ -17,7 +21,7 @@ Built for HackCU and recognized as the **MLH MongoDB Track Winner**, as describe
 - Extract paper context through a Chrome side panel.
 - Experiment with optional voice playback and Solana payment checks.
 
-This is a hackathon-origin application with continued engineering work. Provider-dependent functionality needs configured services. Generated answers require human verification; this README does not establish production readiness or a working public demo.
+This is a hackathon-origin application with continued engineering work. The hosted PDF, Atlas retrieval, Gemini answers, citations, and graph flow was verified on October 15, 2026; see [the verification record](docs/DEMO_VERIFICATION.md). Generated answers require human verification. A working demo is not a production-readiness or retrieval-accuracy benchmark. ElevenLabs is not enabled; voice uses the browser's optional speech fallback.
 
 ## Engineering focus
 

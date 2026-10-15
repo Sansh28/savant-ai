@@ -566,12 +566,14 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       audioRef.current.currentTime = 0;
     }
     if (voiceMode === "tts" && typeof window !== "undefined" && "speechSynthesis" in window) {
+      if (ttsUtteranceRef.current) ttsUtteranceRef.current.onerror = null;
       window.speechSynthesis.cancel();
       ttsUtteranceRef.current = null;
     }
     setIsPlaying(false);
     setIsPaused(false);
     setVoiceMode(null);
+    setStage("audio", "idle", "Voice playback stopped by the user.");
     addLog("Voice playback stopped.");
   };
 
@@ -634,11 +636,12 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
       setVoiceMode(null);
       setStage("audio", "degraded", "Browser speech fallback finished playback.");
     };
-    utterance.onerror = () => {
+    utterance.onerror = (event) => {
       setIsPaused(false);
       setIsPlaying(false);
       setVoiceMode(null);
-      setStage("audio", "error", "Browser speech fallback failed.");
+      const cancelled = event.error === "canceled" || event.error === "interrupted";
+      setStage("audio", cancelled ? "idle" : "error", cancelled ? "Voice playback stopped." : "Browser speech fallback failed.");
     };
     ttsUtteranceRef.current = utterance;
     window.speechSynthesis.cancel();
