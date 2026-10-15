@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.post("/graph/extract")
-async def graph_extract(request: models.GraphExtractRequest):
+async def graph_extract(request: models.GraphExtractRequest, owner_id: str = Depends(security.get_owner_id)):
     paper_text = request.paper_text.strip()
     if not paper_text:
         raise HTTPException(status_code=400, detail="paper_text is required")
@@ -20,7 +20,7 @@ async def graph_extract(request: models.GraphExtractRequest):
 
 
 @router.post("/graph/use-cases")
-async def graph_use_cases(request: models.GraphUseCasesRequest):
+async def graph_use_cases(request: models.GraphUseCasesRequest, owner_id: str = Depends(security.get_owner_id)):
     paper_text = request.paper_text.strip()
     if not paper_text:
         raise HTTPException(status_code=400, detail="paper_text is required")

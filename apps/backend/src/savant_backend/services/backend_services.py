@@ -23,6 +23,7 @@ from savant_backend.core_logic import (
     hybrid_rerank,
     local_answer_from_context,
 )
+from savant_backend.demo_limits import charge_provider_call
 from savant_backend.models import VALID_GRAPH_CATEGORIES
 
 LAST_EMBED_TS = 0.0
@@ -115,6 +116,7 @@ async def call_gemini(contents: str, system_instruction: str | None = None, requ
 
     async with httpx.AsyncClient(timeout=45) as http_client:
         for attempt in range(config.GENERATE_MAX_RETRIES + 1):
+            await charge_provider_call("generation")
             try:
                 response = await http_client.post(config.GEMINI_GENERATE_URL, headers={"x-goog-api-key": config.GEMINI_API_KEY}, json=payload)
                 if response.status_code == 429:
@@ -300,6 +302,7 @@ async def embed_via_rest(text: str) -> list[float]:
     last_status_code = None
     async with httpx.AsyncClient(timeout=config.EMBED_REQUEST_TIMEOUT_SECONDS) as http_client:
         for attempt in range(config.EMBED_MAX_RETRIES + 1):
+            await charge_provider_call("embedding")
             try:
                 if config.EMBED_MIN_INTERVAL_SECONDS > 0:
                     now = time.monotonic()

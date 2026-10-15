@@ -252,7 +252,9 @@ async def upload_document(file: Annotated[UploadFile, File()], owner_id: str = D
     services.require_database()
     services.require_runtime_config()
 
-    pdf_bytes = await file.read()
+    pdf_bytes = await file.read(10 * 1024 * 1024 + 1)
+    if len(pdf_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="PDF uploads are limited to 10 MB")
     doc_id = str(uuid.uuid4())
     metadata = await _insert_document_metadata(owner_id, doc_id, filename)
     job = await _create_job(owner_id, "document_ingestion", doc_id, max_retries=1)

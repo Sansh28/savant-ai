@@ -26,6 +26,11 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup() -> None:
+    if config.settings.PUBLIC_DEMO:
+        if config.AUTH_SECRET == "dev-savant-auth-secret-change-me" or len(config.AUTH_SECRET) < 32:
+            raise RuntimeError("Public demo requires a unique AUTH_SECRET of at least 32 characters")
+        if "*" in config.CORS_ALLOW_ORIGINS or not config.MONGODB_URI:
+            raise RuntimeError("Public demo requires explicit CORS origins and MongoDB")
     await store.ensure_indexes()
 
 

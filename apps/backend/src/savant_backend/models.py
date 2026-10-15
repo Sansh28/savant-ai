@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class QueryRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(max_length=4000)
     doc_id: str | None = None
     page_number: int | None = Field(default=None, ge=1)
     session_id: str | None = None
@@ -19,18 +19,18 @@ class CreateSessionRequest(BaseModel):
 
 
 class GraphExtractRequest(BaseModel):
-    paper_text: str
+    paper_text: str = Field(max_length=100000)
 
 
 class GraphUseCasesRequest(BaseModel):
-    paper_text: str
+    paper_text: str = Field(max_length=100000)
 
 
 class GraphAskRequest(BaseModel):
-    concept: str
-    question: str
-    paper_context: str
-    history: list[dict] = Field(default_factory=list)
+    concept: str = Field(max_length=1000)
+    question: str = Field(max_length=4000)
+    paper_context: str = Field(max_length=100000)
+    history: list[dict] = Field(default_factory=list, max_length=16)
     session_id: str | None = None
     node_id: str | None = None
 

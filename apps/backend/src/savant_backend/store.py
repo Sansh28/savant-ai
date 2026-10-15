@@ -23,6 +23,9 @@ async def ensure_indexes() -> None:
     if db is None:
         return
 
+    if config.settings.PUBLIC_DEMO:
+        await db.demo_usage.create_index("expires_at", expireAfterSeconds=0)
+
     collections = [
         (documents_collection, [("owner_id", 1), ("doc_id", 1)], True),
         (documents_collection, [("owner_id", 1), ("status", 1), ("updated_at", -1)], False),

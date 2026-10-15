@@ -20,6 +20,9 @@ class Settings(BaseSettings):
 
     SERVICE_NAME: str = "savant-backend"
     LOG_LEVEL: str = "INFO"
+    PUBLIC_DEMO: bool = False
+    DEMO_GENERATION_CALLS_PER_DAY: int = Field(default=60, ge=1, le=1000)
+    DEMO_EMBEDDING_CALLS_PER_DAY: int = Field(default=300, ge=1, le=5000)
 
     GEMINI_EMBED_URL: str = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent"
     GEMINI_MODEL: str = "gemini-2.5-flash"
