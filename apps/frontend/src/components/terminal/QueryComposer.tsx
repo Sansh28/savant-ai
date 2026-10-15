@@ -61,6 +61,12 @@ export function QueryComposer({
         )}
       </div>
 
+      <p className="text-xs text-[#7f6751]">
+        Public demo: upload public, non-sensitive PDFs only (10 MB max). Extracted text is stored in MongoDB Atlas
+        and sent to Google Gemini for processing. AI answers and citations can be wrong; check the source.
+        The free backend may take about a minute to wake, and daily AI usage is shared and limited.
+      </p>
+
       <form onSubmit={onSubmit} className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
           {activeStage ? (

@@ -44,4 +44,11 @@ async def ensure_indexes() -> None:
     for collection, keys, unique in collections:
         if collection is None or not hasattr(collection, "create_index"):
             continue
-        await collection.create_index(keys, unique=unique)
+        options = {"unique": unique}
+        if unique:
+            # Legacy hackathon records have no owner and can contain duplicate
+            # IDs. Preserve them while enforcing isolation-era uniqueness for
+            # every authenticated owner's records. Queries never adopt legacy data.
+            options["partialFilterExpression"] = {"owner_id": {"$type": "string"}}
+            options["name"] = "owned_" + "_".join(key for key, _ in keys) + "_unique_v1"
+        await collection.create_index(keys, **options)
