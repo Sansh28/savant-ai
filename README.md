@@ -6,7 +6,7 @@ Built for HackCU and recognized as the **MLH MongoDB Track Winner**, as describe
 
 **[Try the live demo →](https://hackcu12.vercel.app/)**
 
-Upload a public PDF, ask a question, inspect its page citations, then open Paper Graph Explorer. Free hosting can take about a minute to wake. Upload public, non-sensitive documents only; AI usage is shared and capped daily.
+Click **Upload research PDF** at the top of the live website, choose a public PDF, ask a question, inspect its page citations, then open Paper Graph Explorer. Free hosting can take about a minute to wake. Upload public, non-sensitive documents only; AI usage is shared and capped daily.
 
 [Architecture](docs/ARCHITECTURE.md) · [Workflow](docs/WORKFLOW.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 

@@ -24,6 +24,7 @@ vi.mock("@/components/SavantTerminal", () => ({
     graphStatusByConversation?: Record<string, string>;
   }) => (
     <div>
+      <input id="savant-pdf-upload" type="file" data-testid="paper-picker" />
       <div data-testid="graph-status">{JSON.stringify(graphStatusByConversation ?? {})}</div>
       <button onClick={() => onConversationChange?.({ conversationId: "conv-1", docId: "doc-1", fileName: "paper.pdf" })}>
         select-conversation
@@ -64,6 +65,15 @@ vi.mock("@/components/PaperGraphExplorer", () => ({
 describe("Home page graph orchestration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("opens the PDF picker from the prominent header button, including graph mode", () => {
+    render(<Home />);
+    fireEvent.click(screen.getByRole("button", { name: "Paper Graph Explorer" }));
+    const pickerClick = vi.spyOn(screen.getByTestId("paper-picker"), "click");
+    fireEvent.click(screen.getByRole("button", { name: "Upload research PDF" }));
+    expect(pickerClick).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("graph-explorer").closest("[aria-hidden]")?.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("restores a cached graph and saved workspace when selecting an existing conversation", async () => {

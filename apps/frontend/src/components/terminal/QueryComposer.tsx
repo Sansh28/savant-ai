@@ -47,7 +47,7 @@ export function QueryComposer({
       <div className="flex items-center gap-4 flex-wrap">
         <label className="cursor-pointer bg-[#7f4c31] hover:bg-[#6b3f28] text-[#fff9f0] font-mono text-sm px-4 py-2 rounded-xl transition border border-[#7f4c31]">
           {isUploading ? "Uploading..." : uploadedFileName ? "Replace Document (PDF)" : "Upload Document (PDF)"}
-          <input type="file" accept=".pdf" className="hidden" onChange={onFileUpload} disabled={isUploading || isProcessing} />
+          <input id="savant-pdf-upload" type="file" accept=".pdf" className="hidden" onChange={onFileUpload} disabled={isUploading || isProcessing} />
         </label>
         {uploadedFileName && <span className="text-[#6d5742] text-sm truncate max-w-[280px]">{uploadedFileName}</span>}
         {shareUrl && (

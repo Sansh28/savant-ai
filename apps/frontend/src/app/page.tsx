@@ -265,12 +265,24 @@ export default function Home() {
               <p className="text-sm text-[#6e5a47] mt-1">Analyze papers with chat, voice, and concept graphs in one focused workspace.</p>
             </div>
             <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="rounded-xl bg-[#7f4c31] px-5 py-3 text-sm font-semibold text-[#fff9f0] hover:bg-[#6b3f28] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7f4c31]"
+                onClick={() => {
+                  setMode("assistant");
+                  const input = document.getElementById("savant-pdf-upload");
+                  if (input instanceof HTMLInputElement) input.click();
+                }}
+              >
+                Upload research PDF
+              </button>
               <div className="hidden sm:flex items-center gap-2 rounded-xl border border-[#cfb999] bg-[#f8efe0] px-3 py-2 text-xs font-mono text-[#7f4c31]">
                 <span className="h-2 w-2 rounded-full bg-[#7f4c31] shadow-[0_0_12px_rgba(127,76,49,0.35)]" />
                 Live Session
               </div>
             </div>
           </div>
+          <p className="mt-3 text-xs text-[#6e5a47]">Start here: upload a public PDF (10 MB max), ask a question, then inspect citations and the concept graph.</p>
         </header>
 
         <div className="flex flex-wrap items-center gap-3">
