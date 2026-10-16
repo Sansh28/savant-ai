@@ -1019,7 +1019,8 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
   };
 
   return (
-    <div className="h-full min-h-[520px] grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">
+    <div className="grid min-w-0 grid-cols-1 items-start xl:grid-cols-[320px_minmax(0,1fr)] gap-4">
+      <div className="order-2 min-w-0 xl:order-1">
       <ConversationSidebar
         activeConversationId={activeConversationId}
         conversations={filteredConversations}
@@ -1043,8 +1044,30 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
         onSelectConversation={setActiveConversationId}
         onTogglePinned={togglePinned}
       />
+      </div>
 
-      <div className="flex flex-col h-full space-y-4 min-h-0">
+      <div className="order-1 flex min-w-0 flex-col space-y-4 xl:order-2">
+        <section aria-label="Ask about your paper" className="rounded-2xl border border-[#cfb999] bg-[#fffaf2] p-4 space-y-3">
+          <h2 className="text-lg font-semibold">Ask a question</h2>
+          <QueryComposer
+            canUseSpeech={canUseSpeech}
+            docId={docId}
+            isListening={isListening}
+            isProcessing={isProcessing}
+            isUploading={isUploading}
+            pageNumber={pageNumber}
+            query={query}
+            shareUrl={shareUrl}
+            uploadedFileName={uploadedFileName}
+            workflowStages={workflowStages}
+            onCopyShareLink={() => void copyShareLink()}
+            onFileUpload={(event) => void handleFileUpload(event)}
+            onPageNumberChange={setPageNumber}
+            onQueryChange={setQuery}
+            onStartVoiceInput={startVoiceInput}
+            onSubmit={(event) => void handleQuerySubmit(event)}
+          />
+        </section>
         {!docId ? <OnboardingPanel exampleQuestions={DEFAULT_SUGGESTIONS} onUseExampleQuestion={setQuery} /> : null}
 
         <TimelinePanel
@@ -1117,24 +1140,6 @@ export function SavantTerminal({ onUploadComplete, onConversationChange, graphSt
             applySuggestedQuestion={applySuggestedQuestion}
           />
 
-          <QueryComposer
-            canUseSpeech={canUseSpeech}
-            docId={docId}
-            isListening={isListening}
-            isProcessing={isProcessing}
-            isUploading={isUploading}
-            pageNumber={pageNumber}
-            query={query}
-            shareUrl={shareUrl}
-            uploadedFileName={uploadedFileName}
-            workflowStages={workflowStages}
-            onCopyShareLink={() => void copyShareLink()}
-            onFileUpload={(event) => void handleFileUpload(event)}
-            onPageNumberChange={setPageNumber}
-            onQueryChange={setQuery}
-            onStartVoiceInput={startVoiceInput}
-            onSubmit={(event) => void handleQuerySubmit(event)}
-          />
         </div>
       </div>
     </div>

@@ -84,13 +84,14 @@ export function QueryComposer({
             </span>
           ))}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input
             type="text"
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder="Ask Savant to analyze the document..."
-            className="flex-1 bg-[#fffdf8] border border-[#cfb999] rounded-xl px-4 py-2 font-mono text-sm text-[#261d17] focus:outline-none focus:border-[#8a6344]"
+            aria-label="Your question about the paper"
+            className="min-w-0 basis-full sm:basis-64 flex-1 bg-[#fffdf8] border border-[#cfb999] rounded-xl px-4 py-3 font-mono text-sm text-[#261d17] focus:outline-none focus:border-[#8a6344]"
             disabled={!docId || isUploading || isProcessing}
           />
           <input
@@ -99,6 +100,7 @@ export function QueryComposer({
             value={pageNumber}
             onChange={(e) => onPageNumberChange(e.target.value)}
             placeholder="Page"
+            aria-label="Page number (optional)"
             className="w-24 bg-[#fffdf8] border border-[#cfb999] rounded-xl px-2 py-2 font-mono text-sm text-[#261d17] focus:outline-none focus:border-[#8a6344]"
             disabled={!docId || isUploading || isProcessing}
           />

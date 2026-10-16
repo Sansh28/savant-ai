@@ -252,9 +252,9 @@ export default function Home() {
   );
 
   return (
-    <div className="relative h-screen w-screen text-[#1d1f24] p-3 sm:p-5 overflow-hidden">
+    <div className="relative min-h-screen w-full text-[#1d1f24] p-3 sm:p-5">
       <FloatingNodesBackground />
-      <main className="relative z-10 flex flex-col gap-4 h-full w-full max-w-[1720px] mx-auto">
+      <main className="relative z-10 flex flex-col gap-4 w-full max-w-[1720px] mx-auto">
         <header className="rounded-3xl border border-[#cfb999] bg-[#fffcf6]/88 backdrop-blur-xl px-5 py-4 shadow-[0_24px_60px_rgba(66,46,20,0.16)]">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
@@ -318,7 +318,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 flex flex-col gap-4 rounded-3xl border border-[#cfb999] bg-[#fffcf6]/90 backdrop-blur-xl p-3 sm:p-4 overflow-hidden shadow-[0_30px_80px_rgba(66,46,20,0.14)]">
+        <div className="min-w-0 flex flex-col gap-4 rounded-3xl border border-[#cfb999] bg-[#fffcf6]/90 backdrop-blur-xl p-3 sm:p-4 shadow-[0_30px_80px_rgba(66,46,20,0.14)]">
           <div className={mode === "assistant" ? "block" : "hidden"} aria-hidden={mode !== "assistant"}>
             <SavantTerminal
               onConversationChange={handleConversationChange}
